@@ -10,6 +10,7 @@
     "test": "vitest"
   },
   "dependencies": {
+    "@vercel/analytics": "^1.6.1",
     "@xyflow/react": "^12.0.0",
     "axios": "^1.6.7",
     "clsx": "^2.1.0",
