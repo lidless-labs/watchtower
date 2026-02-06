@@ -1,53 +1,46 @@
-# Dependencies
-node_modules/
-venv/
-__pycache__/
-*.pyc
-.pytest_cache/
+# AI/Automation Files - DO NOT COMMIT
+CLAUDE.md
+BOOTSTRAP.md
+SOUL.md
+IDENTITY.md
+USER.md
+AGENTS.md
+HEARTBEAT.md
+TOOLS.md
+SAFETY_RULES.md
+MEMORY.md
 
-# Build outputs
-dist/
-build/
-*.egg-info/
+# Claude Code project files
+.claude/
 
-# Environment
+# OpenClaw files
+.openclaw/
+*.sqlite
+
+# Environment files
 .env
-.env.local
-.env.*.local
+.env.*
+*.env
 
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# OS
-.DS_Store
-Thumbs.db
+# Secrets
+credentials.json
+*-credentials.json
+*.pem
+*.key
+id_rsa*
+id_ed25519*
 
 # Logs
 *.log
 logs/
 
-# AI planning files
-CLAUDE.md
-.claude/
-GEMINI.md
-.gemini/
-CODEX.md
-.codex/
-COPILOT.md
-.copilot/
-plan.md
-*.plan.md
-blueprint.md
+# OS files
+.DS_Store
+Thumbs.db
 
-# Local config (contains secrets and network info)
-config/config.yaml
-config/topology.yaml
-config/physical_links.yaml
-
-# Coverage
-coverage/
-.coverage
-htmlcov/
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
