@@ -2,6 +2,7 @@ import { useCallback, useEffect } from 'react'
 import { useAlertStore } from '../store/alertStore'
 import { useSettingsStore } from '../store/settingsStore'
 import { fetchAlerts, acknowledgeAlert as apiAcknowledgeAlert } from '../api/endpoints'
+import type { Alert } from '../types/alert'
 
 export function useAlerts() {
   const alerts = useAlertStore((state) => state.alerts)
@@ -22,8 +23,8 @@ export function useAlerts() {
     async function loadAlerts() {
       try {
         const alertList = await fetchAlerts()
-        // Convert AlertSummary to Alert (they have the same shape for display)
-        setAlerts(alertList as any)
+        // AlertSummary is structurally compatible with Alert (extra fields are optional)
+        setAlerts(alertList as Alert[])
       } catch (err) {
         console.error('Failed to load alerts:', err)
       }

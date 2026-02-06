@@ -18,7 +18,7 @@ export default function Header() {
         <div className="text-accent-cyan text-xl md:text-2xl font-bold tracking-tight">
           <span className="text-text-primary">WATCH</span>TOWER
         </div>
-        <span className="bg-purple-500/20 text-purple-400 text-xs px-2 py-1 rounded font-medium">
+        <span className="bg-accent-purple/20 text-accent-purple text-xs px-2 py-1 rounded font-medium">
           DEMO
         </span>
 

@@ -302,10 +302,8 @@ function resolveOverlaps(
       // Skip device nodes - they move with their cluster
       if (nodeA.type === 'device') continue
 
-      // Get the effective bounding box for this node
-      let effectiveBoxA = boxA
+      // Skip expanded clusters since they become device nodes
       if (nodeA.type === 'cluster' && expandedClusterIds.has(nodeA.id)) {
-        // This shouldn't happen since expanded clusters become device nodes
         continue
       }
 
@@ -316,12 +314,10 @@ function resolveOverlaps(
         // Skip device nodes in same cluster
         if (nodeB.type === 'device') continue
 
-        let effectiveBoxB = boxB
-
         // Check for overlap
-        if (boxesOverlap(effectiveBoxA, effectiveBoxB)) {
+        if (boxesOverlap(boxA, boxB)) {
           hasOverlap = true
-          const push = calculatePushVector(effectiveBoxA, effectiveBoxB)
+          const push = calculatePushVector(boxA, boxB)
 
           // Push node B
           result[j].position.x += push.x
