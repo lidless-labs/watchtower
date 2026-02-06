@@ -1,53 +1,70 @@
-# Dependencies
-node_modules/
-venv/
-__pycache__/
-*.pyc
-.pytest_cache/
+# Personal AI context - DO NOT COMMIT
+BOOTSTRAP.md
+SOUL.md
+IDENTITY.md
+USER.md
+AGENTS.md
+HEARTBEAT.md
+TOOLS.md
+SAFETY_RULES.md
+MEMORY.md
+memory/
 
-# Build outputs
-dist/
-build/
-*.egg-info/
+# OpenClaw files
+.openclaw/
+*.sqlite
 
-# Environment
-.env
-.env.local
-.env.*.local
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Logs
-*.log
-logs/
-
-# AI planning files
-CLAUDE.md
-.claude/
+# AI Planning/Context (other providers)
 GEMINI.md
 .gemini/
 CODEX.md
 .codex/
 COPILOT.md
 .copilot/
+KIMI.md
+.kimi/
+.cursorrules
+.cursor/
+.continuerules
+.continue/
+.aider*
+.roo/
+.pi/
 plan.md
 *.plan.md
 blueprint.md
+.agents/
+.soul/
 
-# Local config (contains secrets and network info)
+# Environment files
+.env
+.env.*
+*.env
+
+# Secrets
+credentials.json
+*-credentials.json
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+
+# Logs
+*.log
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Repo-specific
 config/config.yaml
 config/topology.yaml
 config/physical_links.yaml
-
-# Coverage
-coverage/
-.coverage
-htmlcov/
