@@ -420,6 +420,16 @@ function getExpandedDevicePositions(
   })
 }
 
+// Hierarchical tier mapping for network topology layout
+const CLUSTER_TIER: Record<string, number> = {
+  edge: 0,     // Security/firewall at top
+  core: 1,     // Core backbone below edge
+  distribution: 2, // Distribution/aggregation
+  wireless: 3, // Access layer (left)
+  proxmox: 3,  // Servers (right)
+  branch: 1,   // Separate site, aligned with core tier
+}
+
 // Generate automatic layout positions for clusters if not defined well
 function getClusterDefaultPosition(
   index: number,
@@ -431,10 +441,21 @@ function getClusterDefaultPosition(
     return { x: cluster.position.x, y: cluster.position.y }
   }
 
-  // Otherwise generate a grid layout
+  // Try hierarchy-aware layout based on cluster id
+  const tier = CLUSTER_TIER[cluster.id]
+  if (tier !== undefined) {
+    const tierY = 80 + tier * 220
+    // Offset access-layer clusters horizontally
+    if (cluster.id === 'wireless') return { x: 200, y: tierY }
+    if (cluster.id === 'proxmox') return { x: 800, y: tierY }
+    if (cluster.id === 'branch') return { x: 1050, y: tierY }
+    return { x: 500, y: tierY }
+  }
+
+  // Fallback: generate a grid layout for unknown clusters
   const cols = Math.ceil(Math.sqrt(totalClusters))
   const spacingX = 400
-  const spacingY = 300
+  const spacingY = 250
   const col = index % cols
   const row = Math.floor(index / cols)
 
@@ -502,17 +523,22 @@ function topologyToNodes(
   })
 
   // Create external endpoint nodes from external links
+  // Position external nodes above the edge tier for clean topology
   const externalEndpoints = new Map<string, { label: string; type: string; icon: string; x: number; y: number }>()
+  let externalIndex = 0
 
-  topology.external_links.forEach((link, index) => {
+  topology.external_links.forEach((link) => {
     if (!externalEndpoints.has(link.target.label)) {
+      const isCloud = link.target.type === 'cloud'
       externalEndpoints.set(link.target.label, {
         label: link.target.label,
         type: link.target.type,
         icon: link.target.icon,
-        x: 50,
-        y: 150 + index * 150,
+        // Place cloud/WAN endpoints above edge, campus endpoints to the right
+        x: isCloud ? 300 + externalIndex * 280 : 1050,
+        y: isCloud ? -120 : -50,
       })
+      externalIndex++
     }
 
     if (link.source.label && !externalEndpoints.has(link.source.label)) {
@@ -520,8 +546,8 @@ function topologyToNodes(
         label: link.source.label,
         type: 'campus',
         icon: 'building',
-        x: 50,
-        y: 150 + (index + 1) * 150,
+        x: 1050,
+        y: -50,
       })
     }
   })
@@ -888,7 +914,9 @@ function TopologyCanvasInner() {
     savedPositionsRef.current = {}
     prevExpandedRef.current = new Set()
     setResetCounter((c) => c + 1)
-  }, [])
+    // Center viewport on the reset layout after nodes update
+    setTimeout(() => fitView({ padding: 0.2, duration: 300 }), 100)
+  }, [fitView])
 
   // Export topology as Mermaid diagram
   const handleExportMermaid = useCallback(() => {
