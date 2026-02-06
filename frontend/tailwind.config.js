@@ -13,12 +13,14 @@ export default {
         'bg-tertiary': '#21262d',
 
         // Borders
+        'border-primary': '#30363d',
         'border-default': '#30363d',
         'border-muted': '#21262d',
 
         // Text
         'text-primary': '#e6edf3',
         'text-secondary': '#8b949e',
+        'text-tertiary': '#484f58',
         'text-muted': '#6e7681',
 
         // Status colors
@@ -28,9 +30,11 @@ export default {
         'status-blue': '#58a6ff',
 
         // Accent colors
+        'accent-primary': '#39d5ff',
         'accent-cyan': '#39d5ff',
         'accent-blue': '#58a6ff',
         'accent-teal': '#2dd4bf',
+        'accent-purple': '#a855f7',
       },
       fontFamily: {
         mono: ['JetBrains Mono', 'Fira Code', 'Consolas', 'monospace'],
