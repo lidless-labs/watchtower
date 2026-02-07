@@ -1,0 +1,54 @@
+# .coderabbit.yaml - CodeRabbit AI Code Review Configuration
+# Docs: https://docs.coderabbit.ai/configuration
+
+language: en-US
+
+reviews:
+  # Auto-review every PR
+  auto_review:
+    enabled: true
+    drafts: false  # Skip draft PRs
+    base_branches:
+      - main
+      - master
+  
+  # Review profile - thorough but not noisy
+  profile: assertive
+  
+  # What to focus on
+  path_instructions:
+    - path: "**/*.py"
+      instructions: |
+        Focus on: type safety, error handling, security (injection, auth), 
+        async patterns, and Python best practices. Flag any hardcoded credentials.
+    - path: "**/*.ts"
+      instructions: |
+        Focus on: TypeScript strictness, proper typing (avoid any), 
+        React best practices, performance (memoization, re-renders).
+    - path: "**/*.tsx"
+      instructions: |
+        Focus on: React patterns, accessibility, proper key props, 
+        error boundaries, responsive design issues.
+    - path: "**/*.astro"
+      instructions: |
+        Focus on: Astro component patterns, proper use of client directives,
+        accessibility, SEO meta tags, performance.
+    - path: "**/Dockerfile"
+      instructions: |
+        Focus on: multi-stage builds, minimal base images, security 
+        (no root user), proper layer caching.
+
+  # Request changes on critical issues, approve on clean PRs
+  request_changes_workflow: true
+  
+  # Collapse verbose sections
+  collapse_walkthrough: true
+
+chat:
+  auto_reply: true
+
+tone_instructions: |
+  Be direct and constructive. Skip praise for obvious things.
+  Focus on bugs, security issues, and performance problems.
+  Suggest specific fixes with code snippets when possible.
+  Never use em dashes. Use commas, periods, or colons instead.

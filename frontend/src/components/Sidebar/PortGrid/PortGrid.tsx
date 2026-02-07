@@ -49,7 +49,7 @@ export default function PortGrid({ interfaces, deviceName }: PortGridProps) {
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3" data-tour="port-grid">
       {/* Switch Chassis */}
       <div className="switch-chassis">
         {/* Chassis top bezel with branding */}

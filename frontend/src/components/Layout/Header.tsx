@@ -1,6 +1,7 @@
 import { useNocStore } from '../../store/nocStore'
 import { useAlertStore } from '../../store/alertStore'
 import StatusDot from '../common/StatusDot'
+import { TourButton } from '../GuidedTour'
 
 export default function Header() {
   const topology = useNocStore((state) => state.topology)
@@ -48,10 +49,10 @@ export default function Header() {
       </div>
 
       {/* Stats and controls */}
-      <div className="flex items-center gap-2 md:gap-6">
+      <div className="flex items-center gap-2 md:gap-4">
         {/* Quick stats */}
         {topology && (
-          <div className="flex items-center gap-4 text-sm">
+          <div className="hidden sm:flex items-center gap-4 text-sm">
             <div className="flex items-center gap-2">
               <StatusDot status="up" />
               <span className="text-text-secondary">
@@ -69,8 +70,33 @@ export default function Header() {
           </div>
         )}
 
+        {/* Tour button - hidden on mobile */}
+        <div className="hidden md:block">
+          <TourButton />
+        </div>
+
+        {/* Docs link - hidden on mobile */}
+        <a
+          href="#docs"
+          className="hidden md:flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-text-secondary hover:text-text-primary bg-bg-tertiary hover:bg-bg-tertiary/80 rounded-md transition-colors"
+          title="View documentation"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
+            />
+          </svg>
+          Docs
+        </a>
+
         {/* Alert bell */}
-        <button className="relative p-2 hover:bg-bg-tertiary rounded-lg transition-colors">
+        <button
+          className="relative p-2 hover:bg-bg-tertiary rounded-lg transition-colors"
+          data-tour="alert-bell"
+        >
           <svg
             className="w-5 h-5 text-text-secondary"
             fill="none"

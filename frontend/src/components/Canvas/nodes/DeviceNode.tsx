@@ -25,6 +25,7 @@ function DeviceNode({ data, selected }: DeviceNodeProps) {
       <Handle type="source" position={Position.Right} className="!bg-border-default" />
 
       <div
+        data-tour="device-node"
         className={`
           group relative bg-bg-secondary border-2 rounded-lg p-3 min-w-[140px]
           transition-all duration-200 cursor-pointer

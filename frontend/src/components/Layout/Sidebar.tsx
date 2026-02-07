@@ -18,7 +18,7 @@ export default function Sidebar() {
   // If something is selected, show the detail view
   if (selectedDevice) {
     return (
-      <div className="h-full flex flex-col overflow-hidden">
+      <div className="h-full flex flex-col overflow-hidden" data-tour="sidebar-device-card">
         <DeviceCard device={selectedDevice} />
       </div>
     )
@@ -63,10 +63,14 @@ export default function Sidebar() {
       <div className="flex-1 overflow-hidden">
         {activeTab === 'overview' ? (
           <div className="h-full overflow-y-auto">
-            <SpeedtestWidget />
+            <div data-tour="speedtest-widget">
+              <SpeedtestWidget />
+            </div>
             <PortGroupWidget />
             <PortSearchWidget />
-            <NetworkSummary />
+            <div data-tour="network-summary">
+              <NetworkSummary />
+            </div>
             <div className="p-3 border-t border-border-primary">
               <div className="text-xs text-text-tertiary text-center">
                 Click a device or connection for details

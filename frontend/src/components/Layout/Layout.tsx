@@ -31,7 +31,7 @@ export default function Layout() {
       <Header />
       <div className="flex-1 flex overflow-hidden">
         {/* Main canvas area */}
-        <main className="flex-1 relative">
+        <main className="flex-1 relative" data-tour="topology-canvas">
           {isLoading ? (
             <div className="absolute inset-0 flex items-center justify-center">
               <div className="flex flex-col items-center gap-3">

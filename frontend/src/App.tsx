@@ -1,8 +1,10 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { ReactFlowProvider } from '@xyflow/react'
 import Layout from './components/Layout/Layout'
 import ToastContainer from './components/Alerts/ToastContainer'
 import CriticalOverlay from './components/Alerts/CriticalOverlay'
+import { GuidedTourAutoStart } from './components/GuidedTour'
+import DocsPage from './pages/DocsPage'
 import { useNocStore } from './store/nocStore'
 import { useWebSocket } from './hooks/useWebSocket'
 import { fetchTopology, fetchSpeedtest } from './api/endpoints'
@@ -48,7 +50,22 @@ if (typeof window !== 'undefined') {
   }
 }
 
-function App() {
+/** Simple hash-based router (no dependency needed) */
+function useHashRoute(): string {
+  const [route, setRoute] = useState(() => window.location.hash.replace('#', '') || '/')
+
+  useEffect(() => {
+    const handler = () => {
+      setRoute(window.location.hash.replace('#', '') || '/')
+    }
+    window.addEventListener('hashchange', handler)
+    return () => window.removeEventListener('hashchange', handler)
+  }, [])
+
+  return route
+}
+
+function DashboardApp() {
   const setTopology = useNocStore((state) => state.setTopology)
   const setLoading = useNocStore((state) => state.setLoading)
   const setError = useNocStore((state) => state.setError)
@@ -88,8 +105,20 @@ function App() {
       <Layout />
       <ToastContainer />
       <CriticalOverlay />
+      <GuidedTourAutoStart />
     </ReactFlowProvider>
   )
+}
+
+function App() {
+  const route = useHashRoute()
+
+  // Render docs page on #docs route
+  if (route === '/docs' || route === 'docs') {
+    return <DocsPage />
+  }
+
+  return <DashboardApp />
 }
 
 export default App
