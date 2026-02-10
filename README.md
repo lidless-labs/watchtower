@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🗼 MockWatchtower
+# 🗼 Solomon's MockWatchtower
 
 **A real-time Network Operations Center (NOC) dashboard for monitoring network infrastructure**
 
