@@ -175,8 +175,14 @@ function App() {
   const loginRoute = route === '/login' || route === 'login'
 
   // Auth gate: require authentication for all protected routes in non-demo mode
-  if (!demoMode && (!isAuthenticated || loginRoute)) {
+  if (!demoMode && !isAuthenticated) {
     return <LoginPage showInitialSetupMessage={initialSetupComplete} />
+  }
+
+  // Redirect authenticated users away from login page to dashboard
+  if (!demoMode && isAuthenticated && loginRoute) {
+    window.location.hash = '#/'
+    return null
   }
 
   // Protected routes (auth verified above in non-demo mode)

@@ -15,7 +15,7 @@ from .client import influx_client
 # ── Input validation for Flux query parameters ──────────────────────────────
 # Only allow safe characters to prevent Flux injection.
 _SAFE_IDENTIFIER = re.compile(r'^[a-zA-Z0-9\-_.:\/]+$')
-_SAFE_DURATION = re.compile(r'^-?\d+[smhdw]$')
+_SAFE_DURATION = re.compile(r'^\d+[smhdw]$')
 _SAFE_TIME_EXPR = re.compile(r'^(now\(\)|-?\d+[smhdw]|\d{4}-\d{2}-\d{2}T[\d:.Z+\-]+)$')
 
 

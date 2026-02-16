@@ -60,7 +60,7 @@ interface HistoryState {
 const API_BASE = '/api/history'
 
 function authHeaders(): Record<string, string> {
-  const token = useAuthStore.getState().token
+  const token = useAuthStore.getState().token || localStorage.getItem('watchtower_token')
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 

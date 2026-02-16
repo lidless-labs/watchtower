@@ -24,21 +24,13 @@ from .websocket import websocket_endpoint, ws_manager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan - startup and shutdown events."""
+    global config  # noqa: PLW0603 — needed to reassign module-level singleton
+
     import asyncio
     import logging
     import secrets
 
     logger = logging.getLogger("watchtower.startup")
-
-    # ── JWT secret safety check ──────────────────────────────────────────
-    if not settings.demo_mode and config.auth.jwt_secret == "change-me-in-production":
-        generated = secrets.token_urlsafe(32)
-        config.auth.jwt_secret = generated
-        logger.critical(
-            "JWT secret is still the default 'change-me-in-production'! "
-            "A random secret has been generated for THIS session. "
-            "Set auth.jwt_secret in config.yaml for persistent sessions."
-        )
 
     # Startup
     await redis_cache.connect()
@@ -56,6 +48,16 @@ async def lifespan(app: FastAPI):
     else:
         # Production mode: start real polling scheduler if LibreNMS is configured
         config = get_config()
+
+        # ── JWT secret safety check (after config reload) ────────────────
+        if config.auth.jwt_secret == "change-me-in-production":
+            generated = secrets.token_urlsafe(32)
+            config.auth.jwt_secret = generated
+            logger.critical(
+                "JWT secret is still the default 'change-me-in-production'! "
+                "A random secret has been generated for THIS session. "
+                "Set auth.jwt_secret in config.yaml for persistent sessions."
+            )
 
         # Sync YAML config → env settings for InfluxDB
         if config.influxdb.enabled or settings.influxdb_enabled:
