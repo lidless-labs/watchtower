@@ -45,7 +45,7 @@ declare global {
   }
 }
 
-const TOUR_STORAGE_KEY = 'mockwatchtower-tour-complete'
+const TOUR_STORAGE_KEY = 'watchtower-tour-complete'
 
 const TOUR_STEPS: TourStep[] = [
   {
