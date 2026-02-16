@@ -9,7 +9,7 @@ from .auth import get_current_user
 from .cache import redis_cache
 from .config import settings, get_config
 from .polling import scheduler
-from .routers import alerts_router, devices_router, topology_router
+from .routers import alerts_router, devices_router, topology_router, history_router
 from .routers.auth_router import router as auth_router
 from .routers.diagnostics import router as diagnostics_router
 from .routers.discovery import router as discovery_router
@@ -32,18 +32,42 @@ async def lifespan(app: FastAPI):
     if settings.demo_mode:
         # Demo mode: pre-populate cache with fake data and start simulator
         from .demo_simulator import initialize_demo_cache, demo_simulator
+        from .history.demo_seeder import seed_demo_history
+        from .history.demo_store import demo_history_store
+
         await initialize_demo_cache()
+        seed_demo_history(demo_history_store)
         asyncio.create_task(demo_simulator())
         print("[DEMO] Demo mode active - using simulated data")
     else:
         # Production mode: start real polling scheduler if LibreNMS is configured
         config = get_config()
+
+        # Sync YAML config → env settings for InfluxDB
+        if config.influxdb.enabled or settings.influxdb_enabled:
+            if config.influxdb.url:
+                settings.influxdb_url = config.influxdb.url
+            if config.influxdb.token:
+                settings.influxdb_token = config.influxdb.token
+            if config.influxdb.org:
+                settings.influxdb_org = config.influxdb.org
+            if config.influxdb.bucket:
+                settings.influxdb_bucket = config.influxdb.bucket
+            settings.influxdb_enabled = True
+
+        if settings.influxdb_enabled:
+            from .history.client import influx_client
+            await influx_client.connect()
+
         if config.data_sources.librenms.url:
             scheduler.start()
 
     yield
 
     # Shutdown
+    if not settings.demo_mode and settings.influxdb_enabled:
+        from .history.client import influx_client
+        await influx_client.disconnect()
     await scheduler.stop()
     await redis_cache.disconnect()
 
@@ -77,6 +101,7 @@ if settings.demo_mode:
     app.include_router(paloalto_router, prefix="/api", tags=["paloalto"])
     app.include_router(portgroups_router, prefix="/api", tags=["port-groups"])
     app.include_router(ports_router, prefix="/api", tags=["ports"])
+    app.include_router(history_router, prefix="/api", tags=["history"])
 else:
     protected = [Depends(get_current_user)]
     app.include_router(topology_router, prefix="/api", tags=["topology"], dependencies=protected)
@@ -89,6 +114,7 @@ else:
     app.include_router(paloalto_router, prefix="/api", tags=["paloalto"], dependencies=protected)
     app.include_router(portgroups_router, prefix="/api", tags=["port-groups"], dependencies=protected)
     app.include_router(ports_router, prefix="/api", tags=["ports"], dependencies=protected)
+    app.include_router(history_router, prefix="/api", tags=["history"], dependencies=protected)
 
 app.include_router(auth_router, prefix="/api", tags=["auth"])
 

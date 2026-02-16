@@ -132,6 +132,51 @@ export async function fetchPortGroups(): Promise<PortGroupStats[]> {
   return mockPortGroups
 }
 
+// History API
+export interface HistoryPoint {
+  time: string
+  value: number
+  [key: string]: string | number
+}
+
+export interface HistoryResponse {
+  points: HistoryPoint[]
+  [key: string]: unknown
+}
+
+export async function fetchDeviceHistory(
+  deviceId: string,
+  range: string = '24h'
+): Promise<{ cpu: HistoryPoint[]; memory: HistoryPoint[]; temperature: HistoryPoint[]; interfaces: Record<string, HistoryPoint[]> }> {
+  const res = await fetch(`/api/history/device/${deviceId}/metrics?range=${range}`)
+  if (!res.ok) return { cpu: [], memory: [], temperature: [], interfaces: {} }
+  return res.json()
+}
+
+export async function fetchNetworkHistorySummary(range: string = '24h'): Promise<HistoryResponse> {
+  const res = await fetch(`/api/history/network/summary?range=${range}`)
+  if (!res.ok) return { points: [] }
+  return res.json()
+}
+
+export async function fetchAlertTimeline(range: string = '24h'): Promise<{ events: Array<{ time: string; device_id: string; hostname: string; severity: string; title: string; state: string }> }> {
+  const res = await fetch(`/api/history/alerts/timeline?range=${range}`)
+  if (!res.ok) return { events: [] }
+  return res.json()
+}
+
+export async function fetchTopTalkers(range: string = '1h'): Promise<{ talkers: Array<{ device_id: string; interface_name: string; in_bps: number; out_bps: number; utilization: number }> }> {
+  const res = await fetch(`/api/history/network/top-talkers?range=${range}`)
+  if (!res.ok) return { talkers: [] }
+  return res.json()
+}
+
+export async function fetchSpeedtestHistory(range: string = '7d'): Promise<HistoryResponse> {
+  const res = await fetch(`/api/history/speedtest?range=${range}`)
+  if (!res.ok) return { points: [] }
+  return res.json()
+}
+
 // Proxmox Node Detail
 export async function fetchProxmoxNode(nodeName: string): Promise<ProxmoxNodeDetail> {
   const data = mockProxmoxNodes[nodeName]
