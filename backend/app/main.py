@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .auth import get_current_user
 from .cache import redis_cache
-from .config import settings, get_config
+from .config import config, settings, get_config
 from .polling import scheduler
 from .routers import alerts_router, devices_router, topology_router, history_router, settings_router
 from .routers.auth_router import router as auth_router
@@ -25,6 +25,20 @@ from .websocket import websocket_endpoint, ws_manager
 async def lifespan(app: FastAPI):
     """Application lifespan - startup and shutdown events."""
     import asyncio
+    import logging
+    import secrets
+
+    logger = logging.getLogger("watchtower.startup")
+
+    # ── JWT secret safety check ──────────────────────────────────────────
+    if not settings.demo_mode and config.auth.jwt_secret == "change-me-in-production":
+        generated = secrets.token_urlsafe(32)
+        config.auth.jwt_secret = generated
+        logger.critical(
+            "JWT secret is still the default 'change-me-in-production'! "
+            "A random secret has been generated for THIS session. "
+            "Set auth.jwt_secret in config.yaml for persistent sessions."
+        )
 
     # Startup
     await redis_cache.connect()

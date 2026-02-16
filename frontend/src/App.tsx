@@ -167,25 +167,25 @@ function App() {
     )
   }
 
-  // Render docs page on #docs route
+  // Docs are public - render before auth gate
   if (route === '/docs' || route === 'docs') {
     return <DocsPage />
   }
 
-  // Render history page on #history route
+  const loginRoute = route === '/login' || route === 'login'
+
+  // Auth gate: require authentication for all protected routes in non-demo mode
+  if (!demoMode && (!isAuthenticated || loginRoute)) {
+    return <LoginPage showInitialSetupMessage={initialSetupComplete} />
+  }
+
+  // Protected routes (auth verified above in non-demo mode)
   if (route === '/history' || route === 'history') {
     return <HistoryPage />
   }
 
-  // Render settings page on #settings route
   if (route === '/settings' || route === 'settings') {
     return <SettingsPage />
-  }
-
-  const loginRoute = route === '/login' || route === 'login'
-
-  if (!demoMode && (!isAuthenticated || loginRoute)) {
-    return <LoginPage showInitialSetupMessage={initialSetupComplete} />
   }
 
   return (

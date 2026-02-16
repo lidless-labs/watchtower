@@ -2,12 +2,42 @@
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from typing import Any
+
+from fastapi import HTTPException
 
 from app.config import settings
 
 from .client import influx_client
+
+# ── Input validation for Flux query parameters ──────────────────────────────
+# Only allow safe characters to prevent Flux injection.
+_SAFE_IDENTIFIER = re.compile(r'^[a-zA-Z0-9\-_.:\/]+$')
+_SAFE_DURATION = re.compile(r'^-?\d+[smhdw]$')
+_SAFE_TIME_EXPR = re.compile(r'^(now\(\)|-?\d+[smhdw]|\d{4}-\d{2}-\d{2}T[\d:.Z+\-]+)$')
+
+
+def _validate_identifier(value: str, name: str) -> str:
+    """Validate device_id, interface_name, metric names."""
+    if not _SAFE_IDENTIFIER.match(value):
+        raise HTTPException(status_code=400, detail=f"Invalid characters in {name}")
+    return value
+
+
+def _validate_time_expr(value: str, name: str) -> str:
+    """Validate Flux time expressions (relative durations or ISO timestamps)."""
+    if not _SAFE_TIME_EXPR.match(value):
+        raise HTTPException(status_code=400, detail=f"Invalid time format for {name}")
+    return value
+
+
+def _validate_duration(value: str, name: str) -> str:
+    """Validate aggregate window durations like '5m', '1h'."""
+    if not _SAFE_DURATION.match(value):
+        raise HTTPException(status_code=400, detail=f"Invalid duration format for {name}")
+    return value
 
 
 class HistoryReader:
@@ -24,6 +54,12 @@ class HistoryReader:
         return points
 
     async def get_device_metrics(self, device_id: str, metric: str, start: str = "-24h", stop: str = "now()", aggregate_window: str = "5m") -> dict[str, Any]:
+        device_id = _validate_identifier(device_id, "device_id")
+        metric = _validate_identifier(metric, "metric")
+        start = _validate_time_expr(start, "start")
+        stop = _validate_time_expr(stop, "stop")
+        aggregate_window = _validate_duration(aggregate_window, "aggregate_window")
+
         flux = f'''
 from(bucket: "{settings.influxdb_bucket}")
   |> range(start: {start}, stop: {stop})
@@ -41,6 +77,12 @@ from(bucket: "{settings.influxdb_bucket}")
         }
 
     async def get_interface_metrics(self, device_id: str, interface_name: str, start: str = "-24h", stop: str = "now()", aggregate_window: str = "5m") -> dict[str, Any]:
+        device_id = _validate_identifier(device_id, "device_id")
+        interface_name = _validate_identifier(interface_name, "interface_name")
+        start = _validate_time_expr(start, "start")
+        stop = _validate_time_expr(stop, "stop")
+        aggregate_window = _validate_duration(aggregate_window, "aggregate_window")
+
         flux = f'''
 from(bucket: "{settings.influxdb_bucket}")
   |> range(start: {start}, stop: {stop})
@@ -68,6 +110,11 @@ from(bucket: "{settings.influxdb_bucket}")
         }
 
     async def get_all_device_interfaces(self, device_id: str, start: str = "-24h", stop: str = "now()", aggregate_window: str = "5m") -> dict[str, Any]:
+        device_id = _validate_identifier(device_id, "device_id")
+        start = _validate_time_expr(start, "start")
+        stop = _validate_time_expr(stop, "stop")
+        aggregate_window = _validate_duration(aggregate_window, "aggregate_window")
+
         flux = f'''
 from(bucket: "{settings.influxdb_bucket}")
   |> range(start: {start}, stop: {stop})
@@ -94,6 +141,10 @@ from(bucket: "{settings.influxdb_bucket}")
         }
 
     async def get_network_summary(self, start: str = "-24h", stop: str = "now()", aggregate_window: str = "15m") -> dict[str, Any]:
+        start = _validate_time_expr(start, "start")
+        stop = _validate_time_expr(stop, "stop")
+        aggregate_window = _validate_duration(aggregate_window, "aggregate_window")
+
         flux = f'''
 from(bucket: "{settings.influxdb_bucket}")
   |> range(start: {start}, stop: {stop})
@@ -113,6 +164,11 @@ from(bucket: "{settings.influxdb_bucket}")
         return {"aggregate_window": aggregate_window, "series": dict(grouped)}
 
     async def get_alert_timeline(self, start: str = "-7d", stop: str = "now()", device_id: str | None = None) -> dict[str, Any]:
+        start = _validate_time_expr(start, "start")
+        stop = _validate_time_expr(stop, "stop")
+        if device_id is not None:
+            device_id = _validate_identifier(device_id, "device_id")
+
         device_filter = f'  |> filter(fn: (r) => r["device_id"] == "{device_id}")\n' if device_id else ""
         flux = f'''
 from(bucket: "{settings.influxdb_bucket}")
@@ -136,6 +192,10 @@ from(bucket: "{settings.influxdb_bucket}")
         return {"events": sorted(events_map.values(), key=lambda e: e.get("time", ""), reverse=True)}
 
     async def get_speedtest_history(self, start: str = "-7d", stop: str = "now()", aggregate_window: str = "15m") -> dict[str, Any]:
+        start = _validate_time_expr(start, "start")
+        stop = _validate_time_expr(stop, "stop")
+        aggregate_window = _validate_duration(aggregate_window, "aggregate_window")
+
         flux = f'''
 from(bucket: "{settings.influxdb_bucket}")
   |> range(start: {start}, stop: {stop})
@@ -155,6 +215,8 @@ from(bucket: "{settings.influxdb_bucket}")
         return {"aggregate_window": aggregate_window, "series": dict(grouped)}
 
     async def get_top_talkers(self, start: str = "-1h", limit: int = 10) -> dict[str, Any]:
+        start = _validate_time_expr(start, "start")
+
         flux = f'''
 from(bucket: "{settings.influxdb_bucket}")
   |> range(start: {start}, stop: now())

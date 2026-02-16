@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { useAuthStore } from './authStore'
 
 export type TimeRange = '1h' | '6h' | '24h' | '7d' | '30d'
 
@@ -58,8 +59,13 @@ interface HistoryState {
 
 const API_BASE = '/api/history'
 
+function authHeaders(): Record<string, string> {
+  const token = useAuthStore.getState().token
+  return token ? { Authorization: `Bearer ${token}` } : {}
+}
+
 async function fetchJSON<T>(url: string): Promise<T> {
-  const res = await fetch(url)
+  const res = await fetch(url, { headers: authHeaders() })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   return res.json()
 }
