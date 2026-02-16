@@ -87,7 +87,7 @@ Access the History page via the clock icon in the header nav.
 
 ## Why This Exists
 
-Real NOC dashboards require production networks. MockWatchTower provides the same experience with simulated data, making it perfect for training new NOC analysts, demoing monitoring concepts, or showcasing network engineering skills.
+Watchtower runs in two modes: production (real LibreNMS/Proxmox/InfluxDB) and demo (simulated data for Vercel). Perfect for enterprise monitoring, training NOC analysts, and showcasing network engineering skills.
 
 ## License
 
