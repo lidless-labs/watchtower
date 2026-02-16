@@ -153,7 +153,11 @@ export default function Header() {
         </button>
 
         {/* Settings */}
-        <button className="p-2 hover:bg-bg-tertiary rounded-lg transition-colors">
+        <a
+          href="#settings"
+          className="p-2 hover:bg-bg-tertiary rounded-lg transition-colors"
+          title="Settings"
+        >
           <svg
             className="w-5 h-5 text-text-secondary"
             fill="none"
@@ -173,7 +177,7 @@ export default function Header() {
               d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
             />
           </svg>
-        </button>
+        </a>
 
         {!demoMode && isAuthenticated && user && (
           <div className="hidden md:flex items-center gap-2 px-2 py-1 rounded-lg bg-bg-tertiary border border-border-default">

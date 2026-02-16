@@ -1,5 +1,6 @@
 """Configuration loader for Watchtower."""
 
+import copy
 import os
 from pathlib import Path
 from typing import Any
@@ -341,3 +342,98 @@ class IntegrationSettings:
 def get_settings() -> IntegrationSettings:
     """Get integration settings for API clients."""
     return IntegrationSettings()
+
+
+def _config_file_path() -> Path:
+    """Resolve config file path using same pattern as auth router."""
+    config_path = Path(settings.config_path)
+    if not config_path.is_absolute():
+        config_path = Path(__file__).parent.parent / settings.config_path
+    return config_path
+
+
+def get_config_dict() -> dict:
+    """Return current config as raw dict from YAML file."""
+    config_path = _config_file_path()
+    if not config_path.exists():
+        return {}
+    return load_yaml_config(str(config_path))
+
+
+def mask_secrets(config_dict: dict) -> dict:
+    """Deep-copy config and mask sensitive fields."""
+    sensitive_markers = ("password", "secret", "token", "api_key")
+
+    def _mask_value(key: str, value: Any) -> Any:
+        if not isinstance(value, str) or value == "":
+            return value
+
+        key_lower = key.lower()
+        if key_lower == "admin_password_hash":
+            return "***"
+
+        if any(marker in key_lower for marker in sensitive_markers):
+            return f"***{value[-4:]}" if len(value) > 4 else "***"
+
+        return value
+
+    def _walk(node: Any) -> Any:
+        if isinstance(node, dict):
+            masked: dict[str, Any] = {}
+            for key, value in node.items():
+                if key == "auth":
+                    continue
+                if isinstance(value, (dict, list)):
+                    masked[key] = _walk(value)
+                else:
+                    masked[key] = _mask_value(key, value)
+            return masked
+
+        if isinstance(node, list):
+            return [_walk(item) for item in node]
+
+        return node
+
+    return _walk(copy.deepcopy(config_dict))
+
+
+def merge_config(existing: dict, updates: dict) -> dict:
+    """Deep merge updates into existing config."""
+    if not isinstance(existing, dict):
+        existing = {}
+
+    merged = copy.deepcopy(existing)
+
+    for key, update_value in updates.items():
+        existing_value = merged.get(key)
+
+        if isinstance(update_value, dict) and isinstance(existing_value, dict):
+            merged[key] = merge_config(existing_value, update_value)
+            continue
+
+        if isinstance(update_value, list):
+            merged[key] = copy.deepcopy(update_value)
+            continue
+
+        if isinstance(update_value, str) and update_value.startswith("***"):
+            if key in merged:
+                continue
+
+        merged[key] = update_value
+
+    return merged
+
+
+def persist_config(updates: dict) -> None:
+    """Merge updates with existing config.yaml and write back, then reload config singleton."""
+    global config
+
+    config_path = _config_file_path()
+    existing = load_yaml_config(str(config_path)) if config_path.exists() else {}
+    merged = merge_config(existing, updates)
+
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(config_path, "w", encoding="utf-8") as f:
+        yaml.safe_dump(merged, f, sort_keys=False)
+
+    config = AppConfig(**merged)

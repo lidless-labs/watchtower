@@ -7,6 +7,7 @@ import { GuidedTourAutoStart } from './components/GuidedTour'
 import DocsPage from './pages/DocsPage'
 import HistoryPage from './pages/HistoryPage'
 import LoginPage from './pages/LoginPage'
+import SettingsPage from './pages/SettingsPage'
 import { useNocStore } from './store/nocStore'
 import { useAuthStore } from './store/authStore'
 import { useWebSocket } from './hooks/useWebSocket'
@@ -174,6 +175,11 @@ function App() {
   // Render history page on #history route
   if (route === '/history' || route === 'history') {
     return <HistoryPage />
+  }
+
+  // Render settings page on #settings route
+  if (route === '/settings' || route === 'settings') {
+    return <SettingsPage />
   }
 
   const loginRoute = route === '/login' || route === 'login'
