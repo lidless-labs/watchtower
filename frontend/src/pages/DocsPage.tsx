@@ -509,6 +509,9 @@ export default function DocsPage() {
           <a href="/" className="text-accent-cyan text-xl font-bold tracking-tight hover:opacity-80 transition-opacity">
             <span className="text-text-primary">WATCH</span>TOWER
           </a>
+          <span className="text-[10px] text-text-tertiary font-medium tracking-widest uppercase border border-border-default rounded px-1.5 py-0.5">
+            S³
+          </span>
           <span className="text-text-muted">|</span>
           <span className="text-text-secondary text-sm font-medium">Documentation</span>
         </div>
