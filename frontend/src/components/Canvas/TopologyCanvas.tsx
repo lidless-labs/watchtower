@@ -16,6 +16,7 @@ import {
 import '@xyflow/react/dist/style.css'
 
 import { useNocStore } from '../../store/nocStore'
+import { useSettingsStore } from '../../store/settingsStore'
 import ClusterNode from './nodes/ClusterNode'
 import DeviceNode from './nodes/DeviceNode'
 import ExternalNode from './nodes/ExternalNode'
@@ -801,6 +802,10 @@ function TopologyCanvasInner() {
   const toggleClusterExpanded = useNocStore((state) => state.toggleClusterExpanded)
   const speedtestStatus = useNocStore((state) => state.speedtestStatus)
 
+  // Settings
+  const showPortLabels = useSettingsStore((state) => state.showPortLabels)
+  const setShowPortLabels = useSettingsStore((state) => state.setShowPortLabels)
+
   // L3 state
   const viewMode = useNocStore((state) => state.viewMode)
   const setViewMode = useNocStore((state) => state.setViewMode)
@@ -1089,6 +1094,17 @@ function TopologyCanvasInner() {
               title="Reset all nodes to default positions"
             >
               Reset Layout
+            </button>
+            <button
+              onClick={() => setShowPortLabels(!showPortLabels)}
+              className={`px-3 py-1.5 text-xs rounded-md transition-colors ${
+                showPortLabels
+                  ? 'bg-accent-cyan/20 border border-accent-cyan/40 text-accent-cyan'
+                  : 'bg-bg-secondary border border-border-default text-text-secondary hover:text-text-primary hover:bg-bg-tertiary'
+              }`}
+              title={showPortLabels ? 'Hide port labels and link speeds' : 'Show port labels and link speeds (Packet Tracer style)'}
+            >
+              {showPortLabels ? 'Labels On' : 'Labels Off'}
             </button>
           </div>
         )}
