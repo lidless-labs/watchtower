@@ -44,6 +44,45 @@ Frontend at [http://localhost:5173](http://localhost:5173), API at [http://local
 | Real-time | WebSockets | Live metric streaming |
 | Styling | CSS Modules | Scoped component styles |
 
+## Updating Production
+
+Pull the latest and update everything in one command:
+
+```bash
+./scripts/update.sh
+```
+
+Options:
+- `--no-pull` - Skip git pull (if you already pulled manually)
+- `--backend` - Backend only (skip frontend rebuild)
+- `--frontend` - Frontend only (skip backend restart)
+
+The script handles: git pull, pip install, npm build, InfluxDB container check, and service restart (supports systemd, PM2, or bare uvicorn).
+
+## Historical Data (InfluxDB)
+
+Phase 11 adds time-series storage for device metrics, interface throughput, alerts, and speedtest results.
+
+**Demo mode:** Works immediately with 7 days of seeded mock data. No setup needed.
+
+**Production setup:**
+```bash
+./scripts/setup-influxdb.sh
+```
+
+This starts the InfluxDB container, creates retention buckets (30d raw, 1y hourly, 5y daily), and sets up downsampling tasks. Then add the config to `config/config.yaml`:
+
+```yaml
+influxdb:
+  url: "http://localhost:8086"
+  token: "your-token"
+  org: "watchtower"
+  bucket: "watchtower"
+  enabled: true
+```
+
+Access the History page via the clock icon in the header nav.
+
 ## Why This Exists
 
 Real NOC dashboards require production networks. MockWatchTower provides the same experience with simulated data, making it perfect for training new NOC analysts, demoing monitoring concepts, or showcasing network engineering skills.

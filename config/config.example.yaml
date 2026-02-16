@@ -78,6 +78,15 @@ notifications:
       from_number: ""
       recipients: []
 
+# InfluxDB Historical Data
+# Run ./scripts/setup-influxdb.sh to set up the container and buckets
+influxdb:
+  url: "http://localhost:8086"
+  token: "watchtower-dev-token"  # Change in production!
+  org: "watchtower"
+  bucket: "watchtower"
+  enabled: false  # Set to true after running setup-influxdb.sh
+
 # Alert Thresholds
 alert_thresholds:
   defaults:
