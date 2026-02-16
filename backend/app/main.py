@@ -9,7 +9,7 @@ from .auth import get_current_user
 from .cache import redis_cache
 from .config import settings, get_config
 from .polling import scheduler
-from .routers import alerts_router, devices_router, topology_router, history_router
+from .routers import alerts_router, devices_router, topology_router, history_router, settings_router
 from .routers.auth_router import router as auth_router
 from .routers.diagnostics import router as diagnostics_router
 from .routers.discovery import router as discovery_router
@@ -102,6 +102,7 @@ if settings.demo_mode:
     app.include_router(portgroups_router, prefix="/api", tags=["port-groups"])
     app.include_router(ports_router, prefix="/api", tags=["ports"])
     app.include_router(history_router, prefix="/api", tags=["history"])
+    app.include_router(settings_router, prefix="/api", tags=["settings"])
 else:
     protected = [Depends(get_current_user)]
     app.include_router(topology_router, prefix="/api", tags=["topology"], dependencies=protected)
@@ -115,6 +116,7 @@ else:
     app.include_router(portgroups_router, prefix="/api", tags=["port-groups"], dependencies=protected)
     app.include_router(ports_router, prefix="/api", tags=["ports"], dependencies=protected)
     app.include_router(history_router, prefix="/api", tags=["history"], dependencies=protected)
+    app.include_router(settings_router, prefix="/api", tags=["settings"], dependencies=protected)
 
 app.include_router(auth_router, prefix="/api", tags=["auth"])
 
