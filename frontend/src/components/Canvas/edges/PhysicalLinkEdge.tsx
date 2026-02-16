@@ -1,5 +1,6 @@
 import { memo, useState } from 'react'
 import { getBezierPath, EdgeLabelRenderer, type Position } from '@xyflow/react'
+import { useSettingsStore } from '../../../store/settingsStore'
 
 interface PhysicalLinkEdgeData {
   sourcePort?: string
@@ -79,6 +80,7 @@ function PhysicalLinkEdge({
   selected,
 }: PhysicalLinkEdgeProps) {
   const [hovered, setHovered] = useState(false)
+  const showPortLabels = useSettingsStore((state) => state.showPortLabels)
 
   const utilization = data?.utilization ?? 0
   const status = data?.status ?? 'up'
@@ -151,50 +153,61 @@ function PhysicalLinkEdge({
 
       {/* Edge labels rendered in HTML layer */}
       <EdgeLabelRenderer>
-        {/* Port labels - always show on hover or select */}
-        {(hovered || selected) && sourcePort && (
+        {/* Port labels - always visible (Packet Tracer style), toggle via settings */}
+        {sourcePort && (showPortLabels || hovered || selected) && (
           <div
             style={{
               position: 'absolute',
               transform: `translate(-50%, -50%) translate(${sourcePortX}px, ${sourcePortY}px)`,
               pointerEvents: 'none',
+              opacity: hovered || selected ? 1 : 0.75,
+              transition: 'opacity 0.2s',
             }}
-            className="text-xs bg-bg-secondary/90 text-text-secondary px-1.5 py-0.5 rounded border border-border-primary font-mono"
+            className="text-[10px] bg-bg-secondary/80 text-text-secondary px-1 py-0.5 rounded font-mono leading-none"
           >
             {sourcePort}
           </div>
         )}
 
-        {(hovered || selected) && targetPort && (
+        {targetPort && (showPortLabels || hovered || selected) && (
           <div
             style={{
               position: 'absolute',
               transform: `translate(-50%, -50%) translate(${targetPortX}px, ${targetPortY}px)`,
               pointerEvents: 'none',
+              opacity: hovered || selected ? 1 : 0.75,
+              transition: 'opacity 0.2s',
             }}
-            className="text-xs bg-bg-secondary/90 text-text-secondary px-1.5 py-0.5 rounded border border-border-primary font-mono"
+            className="text-[10px] bg-bg-secondary/80 text-text-secondary px-1 py-0.5 rounded font-mono leading-none"
           >
             {targetPort}
           </div>
         )}
 
-        {/* Center label with speed and utilization */}
-        {(hovered || selected || utilization >= 60) && (
+        {/* Center label - shows speed (when port labels enabled or hovered), expands on hover for utilization */}
+        {status !== 'down' && (showPortLabels || hovered || selected || utilization >= 60) && (
           <div
             style={{
               position: 'absolute',
               transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
               pointerEvents: 'none',
+              transition: 'opacity 0.2s',
             }}
-            className="text-xs bg-bg-secondary/95 text-text-primary px-2 py-1 rounded border border-border-primary shadow-lg"
+            className={`text-[10px] px-1.5 py-0.5 rounded leading-none ${
+              hovered || selected
+                ? 'bg-bg-secondary/95 border border-border-primary shadow-lg'
+                : 'bg-bg-secondary/70'
+            }`}
           >
-            <div className="flex items-center gap-2">
-              <span className="text-text-secondary">{formatSpeed(speed)}</span>
-              <span className={`font-medium ${utilization >= 85 ? 'text-red-400' : utilization >= 60 ? 'text-yellow-400' : 'text-green-400'}`}>
-                {utilization.toFixed(0)}%
-              </span>
-              {connectionType && (
-                <span className="text-text-tertiary text-xs">({connectionType})</span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-text-secondary font-medium">{formatSpeed(speed)}</span>
+              {(hovered || selected || utilization >= 60) && (
+                <span className={`font-medium ${utilization >= 85 ? 'text-red-400' : utilization >= 60 ? 'text-yellow-400' : 'text-green-400'}`}>
+                  {utilization.toFixed(0)}%
+                </span>
+              )}
+              {(hovered || selected) && connectionType && (
+                <span className="text-text-tertiary">({connectionType})</span>
               )}
             </div>
           </div>

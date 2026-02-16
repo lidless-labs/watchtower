@@ -12,6 +12,7 @@ interface SettingsState {
   animationSpeed: AnimationSpeed
   showSparklines: boolean
   showLinkUtilization: boolean
+  showPortLabels: boolean
 
   // Alerts
   soundEnabled: boolean
@@ -25,6 +26,7 @@ interface SettingsState {
   setAnimationSpeed: (speed: AnimationSpeed) => void
   setShowSparklines: (show: boolean) => void
   setShowLinkUtilization: (show: boolean) => void
+  setShowPortLabels: (show: boolean) => void
   setSoundEnabled: (enabled: boolean) => void
   setSoundVolume: (volume: number) => void
   setCriticalOverlayEnabled: (enabled: boolean) => void
@@ -40,6 +42,7 @@ export const useSettingsStore = create<SettingsState>()(
       animationSpeed: 'normal',
       showSparklines: true,
       showLinkUtilization: true,
+      showPortLabels: true,
       soundEnabled: true,
       soundVolume: 0.6,
       criticalOverlayEnabled: true,
@@ -51,6 +54,7 @@ export const useSettingsStore = create<SettingsState>()(
       setAnimationSpeed: (animationSpeed) => set({ animationSpeed }),
       setShowSparklines: (showSparklines) => set({ showSparklines }),
       setShowLinkUtilization: (showLinkUtilization) => set({ showLinkUtilization }),
+      setShowPortLabels: (showPortLabels) => set({ showPortLabels }),
       setSoundEnabled: (soundEnabled) => set({ soundEnabled }),
       setSoundVolume: (soundVolume) => set({ soundVolume }),
       setCriticalOverlayEnabled: (criticalOverlayEnabled) => set({ criticalOverlayEnabled }),
