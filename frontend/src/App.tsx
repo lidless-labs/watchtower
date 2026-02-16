@@ -5,7 +5,9 @@ import ToastContainer from './components/Alerts/ToastContainer'
 import CriticalOverlay from './components/Alerts/CriticalOverlay'
 import { GuidedTourAutoStart } from './components/GuidedTour'
 import DocsPage from './pages/DocsPage'
+import LoginPage from './pages/LoginPage'
 import { useNocStore } from './store/nocStore'
+import { useAuthStore } from './store/authStore'
 import { useWebSocket } from './hooks/useWebSocket'
 import { fetchTopology, fetchSpeedtest } from './api/endpoints'
 
@@ -17,7 +19,7 @@ import { fetchTopology, fetchSpeedtest } from './api/endpoints'
 //   window.watchtower.setSpeedtestDown()    // Turn external links red
 //   window.watchtower.setSpeedtestNormal()  // Turn external links green
 if (typeof window !== 'undefined') {
-  (window as unknown as { watchtower: unknown }).watchtower = {
+  ;(window as unknown as { watchtower: unknown }).watchtower = {
     setDeviceDown: (deviceId: string) => {
       useNocStore.getState().updateDeviceStatus(deviceId, 'down')
       console.log(`Set ${deviceId} to DOWN`)
@@ -65,7 +67,7 @@ function useHashRoute(): string {
   return route
 }
 
-function DashboardApp() {
+function DashboardApp({ demoMode }: { demoMode: boolean }) {
   const setTopology = useNocStore((state) => state.setTopology)
   const setLoading = useNocStore((state) => state.setLoading)
   const setError = useNocStore((state) => state.setError)
@@ -76,8 +78,7 @@ function DashboardApp() {
   useWebSocket()
 
   useEffect(() => {
-    // Static demo mode: always enabled
-    setDemoMode(true)
+    setDemoMode(demoMode)
 
     async function loadData() {
       setLoading(true)
@@ -98,7 +99,7 @@ function DashboardApp() {
     }
 
     loadData()
-  }, [setTopology, setLoading, setError, setSpeedtestStatus, setDemoMode])
+  }, [demoMode, setTopology, setLoading, setError, setSpeedtestStatus, setDemoMode])
 
   return (
     <ReactFlowProvider>
@@ -112,13 +113,79 @@ function DashboardApp() {
 
 function App() {
   const route = useHashRoute()
+  const [demoMode, setDemoMode] = useState(true)
+  const [configLoaded, setConfigLoaded] = useState(false)
+
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
+  const initialSetupComplete = useAuthStore((state) => state.initialSetupComplete)
+  const checkAuth = useAuthStore((state) => state.checkAuth)
+  const clearInitialSetupFlag = useAuthStore((state) => state.clearInitialSetupFlag)
+  const [showSetupToast, setShowSetupToast] = useState(false)
+
+  useEffect(() => {
+    checkAuth()
+  }, [checkAuth])
+
+  useEffect(() => {
+    if (isAuthenticated && initialSetupComplete) {
+      setShowSetupToast(true)
+      const timer = window.setTimeout(() => {
+        setShowSetupToast(false)
+        clearInitialSetupFlag()
+      }, 3000)
+
+      return () => window.clearTimeout(timer)
+    }
+  }, [isAuthenticated, initialSetupComplete, clearInitialSetupFlag])
+
+  useEffect(() => {
+    async function loadConfig() {
+      try {
+        const response = await fetch('/api/config')
+        if (response.ok) {
+          const data: { demo_mode?: boolean } = await response.json()
+          setDemoMode(Boolean(data.demo_mode))
+        }
+      } catch {
+        // Default to demo mode if config request fails
+        setDemoMode(true)
+      } finally {
+        setConfigLoaded(true)
+      }
+    }
+
+    loadConfig()
+  }, [])
+
+  if (!configLoaded) {
+    return (
+      <div className="min-h-screen bg-bg-primary text-text-secondary flex items-center justify-center">
+        Loading...
+      </div>
+    )
+  }
 
   // Render docs page on #docs route
   if (route === '/docs' || route === 'docs') {
     return <DocsPage />
   }
 
-  return <DashboardApp />
+  const loginRoute = route === '/login' || route === 'login'
+
+  if (!demoMode && (!isAuthenticated || loginRoute)) {
+    return <LoginPage showInitialSetupMessage={initialSetupComplete} />
+  }
+
+  return (
+    <>
+      {showSetupToast && (
+        <div className="fixed top-4 right-4 z-50 rounded-lg border border-accent-cyan/40 bg-bg-secondary px-4 py-2 text-sm text-accent-cyan shadow-lg">
+          Admin account configured.
+        </div>
+      )}
+      <DashboardApp demoMode={demoMode} />
+    </>
+  )
 }
 
 export default App

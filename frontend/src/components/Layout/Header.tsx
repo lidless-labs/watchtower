@@ -1,5 +1,6 @@
 import { useNocStore } from '../../store/nocStore'
 import { useAlertStore } from '../../store/alertStore'
+import { useAuthStore } from '../../store/authStore'
 import StatusDot from '../common/StatusDot'
 import { TourButton } from '../GuidedTour'
 
@@ -8,6 +9,10 @@ export default function Header() {
   const sidebarOpen = useNocStore((state) => state.sidebarOpen)
   const setSidebarOpen = useNocStore((state) => state.setSidebarOpen)
   const alerts = useAlertStore((state) => state.alerts)
+  const demoMode = useNocStore((state) => state.demoMode)
+  const user = useAuthStore((state) => state.user)
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
+  const logout = useAuthStore((state) => state.logout)
 
   const activeAlerts = alerts.filter((a) => a.status === 'active')
   const criticalCount = activeAlerts.filter((a) => a.severity === 'critical').length
@@ -19,9 +24,11 @@ export default function Header() {
         <div className="text-accent-cyan text-xl md:text-2xl font-bold tracking-tight">
           <span className="text-text-primary">WATCH</span>TOWER
         </div>
-        <span className="bg-accent-purple/20 text-accent-purple text-xs px-2 py-1 rounded font-medium">
-          DEMO
-        </span>
+        {demoMode && (
+          <span className="bg-accent-purple/20 text-accent-purple text-xs px-2 py-1 rounded font-medium">
+            DEMO
+          </span>
+        )}
 
         {/* GitHub link - hidden on mobile */}
         <a
@@ -145,6 +152,25 @@ export default function Header() {
             />
           </svg>
         </button>
+
+        {!demoMode && isAuthenticated && user && (
+          <div className="hidden md:flex items-center gap-2 px-2 py-1 rounded-lg bg-bg-tertiary border border-border-default">
+            <div className="w-7 h-7 rounded-full bg-accent-cyan/20 text-accent-cyan flex items-center justify-center text-xs font-semibold">
+              {user.username.slice(0, 1).toUpperCase()}
+            </div>
+            <div className="leading-tight">
+              <div className="text-xs text-text-primary">{user.username}</div>
+              <div className="text-[10px] uppercase tracking-wide text-accent-cyan">{user.role}</div>
+            </div>
+            <button
+              onClick={logout}
+              className="ml-1 text-xs text-text-muted hover:text-text-primary transition-colors"
+              title="Log out"
+            >
+              Logout
+            </button>
+          </div>
+        )}
 
         {/* Sidebar toggle */}
         <button
