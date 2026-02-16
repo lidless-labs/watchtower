@@ -8,9 +8,11 @@
 
 # 🗼 Solomon's Watchtower · S³ Stack
 
+> **S³** — *Solomon, Cubed.* AI-augmented engineering, exponentially.
+
 **Real-time NOC dashboard for enterprise network monitoring.**
 
-Monitor network devices, interfaces, uptime, alerts, and topology in a production-grade Network Operations Center dashboard. Part of the S³ Stack at [solomonneas.dev](https://solomonneas.dev). Built for multi-campus enterprise networks, demos, and training.
+Monitor network devices, interfaces, uptime, alerts, and topology in a production-grade Network Operations Center dashboard. Part of the [S³ Stack](https://solomonneas.dev) — built for multi-campus enterprise networks, demos, and training.
 
 ## Quick Start
 
