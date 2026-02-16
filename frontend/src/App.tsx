@@ -5,6 +5,7 @@ import ToastContainer from './components/Alerts/ToastContainer'
 import CriticalOverlay from './components/Alerts/CriticalOverlay'
 import { GuidedTourAutoStart } from './components/GuidedTour'
 import DocsPage from './pages/DocsPage'
+import HistoryPage from './pages/HistoryPage'
 import LoginPage from './pages/LoginPage'
 import { useNocStore } from './store/nocStore'
 import { useAuthStore } from './store/authStore'
@@ -168,6 +169,11 @@ function App() {
   // Render docs page on #docs route
   if (route === '/docs' || route === 'docs') {
     return <DocsPage />
+  }
+
+  // Render history page on #history route
+  if (route === '/history' || route === 'history') {
+    return <HistoryPage />
   }
 
   const loginRoute = route === '/login' || route === 'login'

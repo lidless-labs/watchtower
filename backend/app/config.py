@@ -176,6 +176,16 @@ class PortGroupConfig(BaseModel):
     logging: PortGroupLogging = PortGroupLogging()
 
 
+class InfluxDBConfig(BaseModel):
+    """InfluxDB history storage configuration."""
+
+    url: str = "http://localhost:8086"
+    token: str = ""
+    org: str = "watchtower"
+    bucket: str = "watchtower"
+    enabled: bool = False
+
+
 class AppConfig(BaseModel):
     auth: AuthConfig = AuthConfig()
     data_sources: DataSourcesConfig = DataSourcesConfig()
@@ -186,6 +196,7 @@ class AppConfig(BaseModel):
     speedtest: SpeedtestConfig = SpeedtestConfig()
     palo_alto: PaloAltoConfig = PaloAltoConfig()
     port_groups: list[PortGroupConfig] = []
+    influxdb: InfluxDBConfig = InfluxDBConfig()
 
 
 class Settings(BaseSettings):
@@ -196,6 +207,12 @@ class Settings(BaseSettings):
     demo_mode: bool = False  # Run with fake data, no real APIs needed
     config_path: str = "../config/config.yaml"
     topology_path: str = "../config/topology.yaml"
+
+    influxdb_url: str = "http://localhost:8086"
+    influxdb_token: str = ""
+    influxdb_org: str = "watchtower"
+    influxdb_bucket: str = "watchtower"
+    influxdb_enabled: bool = False
 
     class Config:
         env_file = ".env"

@@ -15,7 +15,8 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
 from app.cache import redis_cache
-from app.config import get_config, get_settings
+from app.config import get_config, get_settings, settings
+from app.history import history_writer, influx_client
 from app.models.device import DeviceStatus
 from app.polling.librenms import LibreNMSClient, LibreNMSDevice
 from app.polling.proxmox import ProxmoxClient
@@ -178,6 +179,20 @@ class PollingScheduler:
         )
 
 
+def _fire_and_forget_history(coro: Any, operation: str) -> None:
+    """Run history write in background and only log failures."""
+    if settings.demo_mode or not settings.influxdb_enabled or not influx_client.is_connected():
+        return
+
+    async def _runner() -> None:
+        try:
+            await coro
+        except Exception as e:
+            logger.warning("History write failed (%s): %s", operation, e)
+
+    asyncio.create_task(_runner())
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Polling Jobs
 # ─────────────────────────────────────────────────────────────────────────────
@@ -244,6 +259,19 @@ async def poll_device_status() -> None:
             await broadcast_status_changes(changes)
             logger.info("Device status changes detected: %d", len(changes))
 
+        active_alerts = len(await redis_cache.get_json(CACHE_ALERTS) or [])
+        devices_up = sum(1 for d in current_status.values() if d.get("status") == "up")
+        devices_down = sum(1 for d in current_status.values() if d.get("status") == "down")
+        _fire_and_forget_history(
+            history_writer.write_network_summary(
+                devices_up=devices_up,
+                devices_down=devices_down,
+                total_devices=len(current_status),
+                active_alerts=active_alerts,
+            ),
+            "network_summary",
+        )
+
         logger.debug("Polled %d devices from LibreNMS", len(devices))
 
     except Exception as e:
@@ -292,6 +320,10 @@ async def poll_interfaces() -> None:
                             port_data,
                             ttl=300,  # 5 min TTL
                         )
+                        _fire_and_forget_history(
+                            history_writer.write_interface_metrics(str(device_id), port_data),
+                            f"interface_metrics:{device_id}",
+                        )
                         polled_count += 1
                 except Exception as e:
                     logger.debug("Failed to poll interfaces for device %s: %s", device_id, e)
@@ -334,6 +366,12 @@ async def poll_health() -> None:
 
         # Cache all health data in one key
         await redis_cache.set(CACHE_HEALTH, health_data, ttl=300)
+
+        _fire_and_forget_history(
+            history_writer.write_device_metrics(health_data=health_data, device_configs=devices_data),
+            "device_metrics",
+        )
+
         logger.debug("Polled health for %d devices", len(health_data))
 
     except Exception as e:
@@ -375,10 +413,19 @@ async def poll_alerts() -> None:
         if new_alert_ids:
             new_alerts = [a for a in current_alerts if a["id"] in new_alert_ids]
             await broadcast_new_alerts(new_alerts)
+            _fire_and_forget_history(
+                history_writer.write_alert_events(new_alerts, state="active"),
+                "alert_events_active",
+            )
             logger.info("New alerts detected: %d", len(new_alerts))
 
         if resolved_ids:
+            resolved_alerts = [a for a in previous_alerts if a.get("id") in resolved_ids]
             await broadcast_resolved_alerts(list(resolved_ids))
+            _fire_and_forget_history(
+                history_writer.write_alert_events(resolved_alerts, state="resolved"),
+                "alert_events_resolved",
+            )
             logger.info("Alerts resolved: %d", len(resolved_ids))
 
     except Exception as e:
@@ -603,7 +650,13 @@ async def poll_speedtest() -> None:
                 speedtest_log_to_csv(result, csv_path)
 
         # Broadcast to WebSocket clients
-        await broadcast_speedtest_result(result.to_dict())
+        result_dict = result.to_dict()
+        await broadcast_speedtest_result(result_dict)
+
+        _fire_and_forget_history(
+            history_writer.write_speedtest(result_dict),
+            "speedtest_results",
+        )
 
         logger.debug(
             "Speedtest poll complete: %.1f Mbps down, status=%s",

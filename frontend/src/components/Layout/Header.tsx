@@ -82,6 +82,23 @@ export default function Header() {
           <TourButton />
         </div>
 
+        {/* History link - hidden on mobile */}
+        <a
+          href="#history"
+          className="hidden md:flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-text-secondary hover:text-text-primary bg-bg-tertiary hover:bg-bg-tertiary/80 rounded-md transition-colors"
+          title="View historical trends"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+            />
+          </svg>
+          History
+        </a>
+
         {/* Docs link - hidden on mobile */}
         <a
           href="#docs"

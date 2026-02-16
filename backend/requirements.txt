@@ -11,6 +11,9 @@ httpx==0.26.0
 # Redis
 redis==5.0.1
 
+# Time-series storage
+influxdb-client[async]>=1.40.0
+
 # Background tasks
 apscheduler==3.10.4
 
