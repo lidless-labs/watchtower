@@ -2,13 +2,15 @@
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from .auth import get_current_user
 from .cache import redis_cache
 from .config import settings, get_config
 from .polling import scheduler
 from .routers import alerts_router, devices_router, topology_router
+from .routers.auth_router import router as auth_router
 from .routers.diagnostics import router as diagnostics_router
 from .routers.discovery import router as discovery_router
 from .routers.vms import router as vms_router
@@ -64,16 +66,31 @@ app.add_middleware(
 )
 
 # Include routers
-app.include_router(topology_router, prefix="/api", tags=["topology"])
-app.include_router(devices_router, prefix="/api", tags=["devices"])
-app.include_router(alerts_router, prefix="/api", tags=["alerts"])
-app.include_router(diagnostics_router, prefix="/api", tags=["diagnostics"])
-app.include_router(discovery_router, prefix="/api", tags=["discovery"])
-app.include_router(vms_router, prefix="/api", tags=["vms"])
-app.include_router(speedtest_router, prefix="/api", tags=["speedtest"])
-app.include_router(paloalto_router, prefix="/api", tags=["paloalto"])
-app.include_router(portgroups_router, prefix="/api", tags=["port-groups"])
-app.include_router(ports_router, prefix="/api", tags=["ports"])
+if settings.demo_mode:
+    app.include_router(topology_router, prefix="/api", tags=["topology"])
+    app.include_router(devices_router, prefix="/api", tags=["devices"])
+    app.include_router(alerts_router, prefix="/api", tags=["alerts"])
+    app.include_router(diagnostics_router, prefix="/api", tags=["diagnostics"])
+    app.include_router(discovery_router, prefix="/api", tags=["discovery"])
+    app.include_router(vms_router, prefix="/api", tags=["vms"])
+    app.include_router(speedtest_router, prefix="/api", tags=["speedtest"])
+    app.include_router(paloalto_router, prefix="/api", tags=["paloalto"])
+    app.include_router(portgroups_router, prefix="/api", tags=["port-groups"])
+    app.include_router(ports_router, prefix="/api", tags=["ports"])
+else:
+    protected = [Depends(get_current_user)]
+    app.include_router(topology_router, prefix="/api", tags=["topology"], dependencies=protected)
+    app.include_router(devices_router, prefix="/api", tags=["devices"], dependencies=protected)
+    app.include_router(alerts_router, prefix="/api", tags=["alerts"], dependencies=protected)
+    app.include_router(diagnostics_router, prefix="/api", tags=["diagnostics"], dependencies=protected)
+    app.include_router(discovery_router, prefix="/api", tags=["discovery"], dependencies=protected)
+    app.include_router(vms_router, prefix="/api", tags=["vms"], dependencies=protected)
+    app.include_router(speedtest_router, prefix="/api", tags=["speedtest"], dependencies=protected)
+    app.include_router(paloalto_router, prefix="/api", tags=["paloalto"], dependencies=protected)
+    app.include_router(portgroups_router, prefix="/api", tags=["port-groups"], dependencies=protected)
+    app.include_router(ports_router, prefix="/api", tags=["ports"], dependencies=protected)
+
+app.include_router(auth_router, prefix="/api", tags=["auth"])
 
 
 @app.get("/health")
