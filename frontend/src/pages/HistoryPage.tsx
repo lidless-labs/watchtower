@@ -64,10 +64,15 @@ export default function HistoryPage() {
               </svg>
             </a>
             <div>
-              <h1 className="text-lg font-bold tracking-tight">
-                <span className="text-text-primary">WATCH</span>
-                <span className="text-accent-cyan">TOWER</span>
-                <span className="text-text-muted font-normal ml-2 text-sm">History</span>
+              <h1 className="text-lg font-bold tracking-tight flex items-center gap-2">
+                <span>
+                  <span className="text-text-primary">WATCH</span>
+                  <span className="text-accent-cyan">TOWER</span>
+                </span>
+                <span className="text-[10px] text-text-tertiary font-medium tracking-widest uppercase border border-border-default rounded px-1.5 py-0.5">
+                  S³
+                </span>
+                <span className="text-text-muted font-normal text-sm">History</span>
               </h1>
             </div>
           </div>

@@ -41,6 +41,9 @@ export default function LoginPage({ showInitialSetupMessage = false }: LoginPage
           <div className="text-accent-cyan text-3xl font-bold tracking-tight">
             <span className="text-text-primary">WATCH</span>TOWER
           </div>
+          <div className="mt-1 text-[10px] text-text-tertiary font-medium tracking-[0.25em] uppercase">
+            S³ Stack · solomonneas.dev
+          </div>
           <p className="mt-2 text-sm text-text-muted">Sign in to access your NOC dashboard</p>
         </div>
 

@@ -21,8 +21,13 @@ export default function Header() {
     <header className="h-14 px-2 md:px-4 flex items-center justify-between border-b border-border-default bg-bg-secondary">
       {/* Logo and title */}
       <div className="flex items-center gap-2 md:gap-3">
-        <div className="text-accent-cyan text-xl md:text-2xl font-bold tracking-tight">
-          <span className="text-text-primary">WATCH</span>TOWER
+        <div className="flex items-center gap-2">
+          <div className="text-accent-cyan text-xl md:text-2xl font-bold tracking-tight">
+            <span className="text-text-primary">WATCH</span>TOWER
+          </div>
+          <span className="hidden md:inline-block text-[10px] text-text-tertiary font-medium tracking-widest uppercase border border-border-default rounded px-1.5 py-0.5">
+            S³
+          </span>
         </div>
         {demoMode && (
           <span className="bg-accent-purple/20 text-accent-purple text-xs px-2 py-1 rounded font-medium">

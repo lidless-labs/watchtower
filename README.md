@@ -6,11 +6,11 @@
   <img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="MIT License" />
 </p>
 
-# 🗼 Solomon's MockWatchTower
+# 🗼 Solomon's Watchtower · S³ Stack
 
-**Real-time NOC dashboard with realistic network monitoring simulation.**
+**Real-time NOC dashboard for enterprise network monitoring.**
 
-Monitor network devices, interfaces, uptime, alerts, and topology in a fully simulated Network Operations Center experience. Built for demos, training, and portfolio showcasing.
+Monitor network devices, interfaces, uptime, alerts, and topology in a production-grade Network Operations Center dashboard. Part of the S³ Stack at [solomonneas.dev](https://solomonneas.dev). Built for multi-campus enterprise networks, demos, and training.
 
 ## Quick Start
 
