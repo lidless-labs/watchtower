@@ -18,6 +18,7 @@ from .routers.speedtest import router as speedtest_router
 from .routers.paloalto import router as paloalto_router
 from .routers.portgroups import router as portgroups_router
 from .routers.ports import router as ports_router
+from .routers.notifications import router as notifications_router
 from .websocket import websocket_endpoint, ws_manager
 
 
@@ -119,6 +120,7 @@ if settings.demo_mode:
     app.include_router(ports_router, prefix="/api", tags=["ports"])
     app.include_router(history_router, prefix="/api", tags=["history"])
     app.include_router(settings_router, prefix="/api", tags=["settings"])
+    app.include_router(notifications_router, prefix="/api/notifications", tags=["notifications"])
 else:
     protected = [Depends(get_current_user)]
     app.include_router(topology_router, prefix="/api", tags=["topology"], dependencies=protected)
@@ -133,6 +135,7 @@ else:
     app.include_router(ports_router, prefix="/api", tags=["ports"], dependencies=protected)
     app.include_router(history_router, prefix="/api", tags=["history"], dependencies=protected)
     app.include_router(settings_router, prefix="/api", tags=["settings"], dependencies=protected)
+    app.include_router(notifications_router, prefix="/api/notifications", tags=["notifications"], dependencies=protected)
 
 app.include_router(auth_router, prefix="/api", tags=["auth"])
 

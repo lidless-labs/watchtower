@@ -92,8 +92,21 @@ class PushoverConfig(BaseModel):
     expire: int = 300
 
 
+class EmailConfig(BaseModel):
+    enabled: bool = False
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_pass: str = ""
+    use_tls: bool = True
+    from_address: str = ""
+    recipients: list[str] = []
+    subject_prefix: str = "[Watchtower]"
+
+
 class NotificationChannels(BaseModel):
     discord: DiscordConfig = DiscordConfig()
+    email: EmailConfig = EmailConfig()
     pushover: PushoverConfig = PushoverConfig()
 
 

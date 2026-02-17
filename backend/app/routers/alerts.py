@@ -1,19 +1,66 @@
 """Alert API routes - Real alerts from LibreNMS and device status."""
 
+import asyncio
+import logging
 from datetime import datetime
 from fastapi import APIRouter, HTTPException
 
 from ..cache import redis_cache
-from ..config import settings
+from ..config import settings, load_config
 from ..polling.aggregator import get_aggregated_topology
 from ..polling.scheduler import CACHE_ALERTS
 from ..models.alert import Alert, AlertStatus, AlertSeverity, AlertSummary
 from ..models.device import DeviceStatus
+from ..services.notification_service import notification_service
+
+logger = logging.getLogger("watchtower.alerts")
 
 router = APIRouter()
 
 # In-memory acknowledgment tracking (persists until service restart)
 _acknowledged_alerts: set[str] = set()
+# Track previously seen alert IDs for notification dispatch
+_previously_seen_alerts: set[str] = set()
+
+
+async def _notify_new_alerts(alerts: list[Alert]) -> None:
+    """Fire notifications for newly appeared alerts."""
+    global _previously_seen_alerts
+    current_ids = {a.id for a in alerts if a.status == AlertStatus.ACTIVE}
+    new_ids = current_ids - _previously_seen_alerts
+    resolved_ids = _previously_seen_alerts - current_ids
+
+    if not new_ids and not resolved_ids:
+        _previously_seen_alerts = current_ids
+        return
+
+    try:
+        config_dict = load_config().model_dump()
+    except Exception:
+        _previously_seen_alerts = current_ids
+        return
+
+    alert_map = {a.id: a for a in alerts}
+
+    for alert_id in new_ids:
+        alert = alert_map.get(alert_id)
+        if not alert:
+            continue
+        severity = alert.severity.value if hasattr(alert.severity, "value") else str(alert.severity)
+        asyncio.create_task(notification_service.dispatch(
+            alert_id=alert.id, alert_type="alert", severity=severity,
+            device=alert.device_id, message=alert.message,
+            details=alert.details or "", config=config_dict, demo=settings.demo_mode,
+        ))
+
+    for alert_id in resolved_ids:
+        asyncio.create_task(notification_service.dispatch(
+            alert_id=alert_id, alert_type="recovery", severity="info",
+            device=alert_id, message=f"Alert resolved: {alert_id}",
+            config=config_dict, demo=settings.demo_mode, is_recovery=True,
+        ))
+
+    _previously_seen_alerts = current_ids
 
 
 async def _get_device_down_alerts() -> list[Alert]:
@@ -116,6 +163,9 @@ async def list_alerts(status: AlertStatus | None = None):
 
     # Sort by timestamp (newest first)
     all_alerts.sort(key=lambda a: a.timestamp, reverse=True)
+
+    # Fire notifications for new/resolved alerts (non-blocking)
+    await _notify_new_alerts(all_alerts)
 
     return [
         AlertSummary(
