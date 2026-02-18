@@ -64,7 +64,7 @@ export interface ConnectionTestResult {
 type SettingsTab = 'integrations' | 'polling' | 'alerts' | 'notifications' | 'speedtest' | 'discovery' | 'users' | 'about'
 
 function authHeaders(): Record<string, string> {
-  const token = useAuthStore.getState().token
+  const token = useAuthStore.getState().token || localStorage.getItem('watchtower_token')
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 

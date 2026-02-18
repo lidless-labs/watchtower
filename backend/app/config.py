@@ -92,8 +92,21 @@ class PushoverConfig(BaseModel):
     expire: int = 300
 
 
+class EmailConfig(BaseModel):
+    enabled: bool = False
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_pass: str = ""
+    use_tls: bool = True
+    from_address: str = ""
+    recipients: list[str] = []
+    subject_prefix: str = "[Watchtower]"
+
+
 class NotificationChannels(BaseModel):
     discord: DiscordConfig = DiscordConfig()
+    email: EmailConfig = EmailConfig()
     pushover: PushoverConfig = PushoverConfig()
 
 
@@ -432,8 +445,11 @@ def persist_config(updates: dict) -> None:
     existing = load_yaml_config(str(config_path)) if config_path.exists() else {}
     merged = merge_config(existing, updates)
 
+    # Validate BEFORE writing to disk
+    validated = AppConfig(**merged)
+
     config_path.parent.mkdir(parents=True, exist_ok=True)
     with open(config_path, "w", encoding="utf-8") as f:
         yaml.safe_dump(merged, f, sort_keys=False)
 
-    config = AppConfig(**merged)
+    config = validated

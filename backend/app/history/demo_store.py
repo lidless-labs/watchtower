@@ -80,12 +80,12 @@ class DemoHistoryStore:
                 field: self._filter_points(points, start, stop)
                 for field, points in fields.items()
             }
-        return {"device_id": device_id, "aggregate_window": aggregate_window, "points": interfaces}
+        return {"device_id": device_id, "aggregate_window": aggregate_window, "interfaces": interfaces}
 
     async def get_network_summary(self, start: str = "-24h", stop: str = "now()", aggregate_window: str = "15m") -> dict[str, Any]:
         return {
             "aggregate_window": aggregate_window,
-            "points": {
+            "series": {
                 field: self._filter_points(points, start, stop)
                 for field, points in self.network_summary.items()
             },
@@ -108,7 +108,7 @@ class DemoHistoryStore:
     async def get_speedtest_history(self, start: str = "-7d", stop: str = "now()", aggregate_window: str = "15m") -> dict[str, Any]:
         return {
             "aggregate_window": aggregate_window,
-            "points": {
+            "series": {
                 field: self._filter_points(points, start, stop)
                 for field, points in self.speedtest.items()
             },
