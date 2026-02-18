@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .auth import get_current_user
 from .cache import redis_cache
-from .config import settings, get_config
+from .config import config, settings, get_config
 from .polling import scheduler
 from .routers import alerts_router, devices_router, topology_router, history_router, settings_router
 from .routers.auth_router import router as auth_router
@@ -18,13 +18,20 @@ from .routers.speedtest import router as speedtest_router
 from .routers.paloalto import router as paloalto_router
 from .routers.portgroups import router as portgroups_router
 from .routers.ports import router as ports_router
+from .routers.notifications import router as notifications_router
 from .websocket import websocket_endpoint, ws_manager
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan - startup and shutdown events."""
+    global config  # noqa: PLW0603 — needed to reassign module-level singleton
+
     import asyncio
+    import logging
+    import secrets
+
+    logger = logging.getLogger("watchtower.startup")
 
     # Startup
     await redis_cache.connect()
@@ -42,6 +49,16 @@ async def lifespan(app: FastAPI):
     else:
         # Production mode: start real polling scheduler if LibreNMS is configured
         config = get_config()
+
+        # ── JWT secret safety check (after config reload) ────────────────
+        if config.auth.jwt_secret == "change-me-in-production":
+            generated = secrets.token_urlsafe(32)
+            config.auth.jwt_secret = generated
+            logger.critical(
+                "JWT secret is still the default 'change-me-in-production'! "
+                "A random secret has been generated for THIS session. "
+                "Set auth.jwt_secret in config.yaml for persistent sessions."
+            )
 
         # Sync YAML config → env settings for InfluxDB
         if config.influxdb.enabled or settings.influxdb_enabled:
@@ -103,6 +120,7 @@ if settings.demo_mode:
     app.include_router(ports_router, prefix="/api", tags=["ports"])
     app.include_router(history_router, prefix="/api", tags=["history"])
     app.include_router(settings_router, prefix="/api", tags=["settings"])
+    app.include_router(notifications_router, prefix="/api/notifications", tags=["notifications"])
 else:
     protected = [Depends(get_current_user)]
     app.include_router(topology_router, prefix="/api", tags=["topology"], dependencies=protected)
@@ -117,6 +135,7 @@ else:
     app.include_router(ports_router, prefix="/api", tags=["ports"], dependencies=protected)
     app.include_router(history_router, prefix="/api", tags=["history"], dependencies=protected)
     app.include_router(settings_router, prefix="/api", tags=["settings"], dependencies=protected)
+    app.include_router(notifications_router, prefix="/api/notifications", tags=["notifications"], dependencies=protected)
 
 app.include_router(auth_router, prefix="/api", tags=["auth"])
 

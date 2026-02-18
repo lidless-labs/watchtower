@@ -2,6 +2,9 @@ import { useEffect, useState } from 'react'
 import { useSettingsApiStore } from '../../store/settingsApiStore'
 import SettingsTab from './SettingsTab'
 import SecretInput from './SecretInput'
+import NotificationHistory from './NotificationHistory'
+
+const API = import.meta.env.VITE_API_URL || ''
 
 function ChannelCard({ title, icon, enabled, onToggle, children }: {
   title: string; icon: string; enabled: boolean; onToggle: (v: boolean) => void; children: React.ReactNode
@@ -50,6 +53,9 @@ export default function NotificationsTab() {
   const [general, setGeneral] = useState({ notify_on: ['critical'], notify_on_recovery: true, cooldown_minutes: 5 })
   const [discord, setDiscord] = useState({ enabled: false, webhook_url: '', mention_role: '@here' })
   const [pushover, setPushover] = useState({ enabled: false, user_key: '', app_token: '', priority: 2 })
+  const [email, setEmail] = useState({ enabled: false, smtp_host: '', smtp_port: 587, smtp_user: '', smtp_pass: '', use_tls: true, from_address: '', recipients: [] as string[], subject_prefix: '[Watchtower]' })
+  const [testing, setTesting] = useState<string | null>(null)
+  const [testResult, setTestResult] = useState<{ channel: string; ok: boolean; msg: string } | null>(null)
 
   useEffect(() => {
     if (settings?.notifications) {
@@ -57,6 +63,10 @@ export default function NotificationsTab() {
       if (n.notify_on) setGeneral({ notify_on: n.notify_on, notify_on_recovery: n.notify_on_recovery ?? true, cooldown_minutes: n.cooldown_minutes ?? 5 })
       if (n.channels?.discord) setDiscord({ enabled: n.channels.discord.enabled ?? false, webhook_url: n.channels.discord.webhook_url ?? '', mention_role: n.channels.discord.mention_role ?? '@here' })
       if (n.channels?.pushover) setPushover({ enabled: n.channels.pushover.enabled ?? false, user_key: n.channels.pushover.user_key ?? '', app_token: n.channels.pushover.app_token ?? '', priority: n.channels.pushover.priority ?? 2 })
+      if (n.channels?.email) {
+        const e = n.channels.email
+        setEmail({ enabled: e.enabled ?? false, smtp_host: e.smtp_host ?? '', smtp_port: e.smtp_port ?? 587, smtp_user: e.smtp_user ?? '', smtp_pass: e.smtp_pass ?? '', use_tls: e.use_tls ?? true, from_address: e.from_address ?? '', recipients: e.recipients ?? [], subject_prefix: e.subject_prefix ?? '[Watchtower]' })
+      }
     }
   }, [settings])
 
@@ -65,8 +75,20 @@ export default function NotificationsTab() {
   const handleSave = () => {
     saveSection('notifications', {
       ...general,
-      channels: { discord, pushover },
+      channels: { discord, pushover, email },
     })
+  }
+
+  const handleTest = async (channel: string) => {
+    setTesting(channel)
+    setTestResult(null)
+    try {
+      const res = await fetch(`${API}/api/notifications/test/${channel}`, { method: 'POST' })
+      const data = await res.json()
+      setTestResult({ channel, ok: data.status === 'success' || data.status === 'demo', msg: data.status === 'success' ? 'Test sent!' : data.error || data.status })
+    } catch (err) {
+      setTestResult({ channel, ok: false, msg: 'Network error' })
+    } finally { setTesting(null) }
   }
 
   return (
@@ -117,6 +139,10 @@ export default function NotificationsTab() {
             <label className="block text-sm text-text-secondary mb-1">Mention Role</label>
             <TextInput value={discord.mention_role} onChange={(v) => { setDiscord((p) => ({ ...p, mention_role: v })); dirty() }} placeholder="@here" />
           </div>
+          <button onClick={() => handleTest('discord')} disabled={testing === 'discord'} className="mt-2 px-3 py-1.5 bg-accent-cyan/20 text-accent-cyan rounded text-xs hover:bg-accent-cyan/30 disabled:opacity-50">
+            {testing === 'discord' ? 'Sending...' : '🧪 Test Discord'}
+          </button>
+          {testResult?.channel === 'discord' && <div className={`text-xs mt-1 ${testResult.ok ? 'text-green-400' : 'text-red-400'}`}>{testResult.msg}</div>}
         </ChannelCard>
 
         <ChannelCard title="Pushover" icon="📱" enabled={pushover.enabled} onToggle={(v) => { setPushover((p) => ({ ...p, enabled: v })); dirty() }}>
@@ -132,7 +158,59 @@ export default function NotificationsTab() {
             <label className="block text-sm text-text-secondary mb-1">Priority (0-2)</label>
             <NumberInput value={pushover.priority} onChange={(v) => { setPushover((p) => ({ ...p, priority: v })); dirty() }} min={0} max={2} />
           </div>
+          <button onClick={() => handleTest('pushover')} disabled={testing === 'pushover'} className="mt-2 px-3 py-1.5 bg-accent-cyan/20 text-accent-cyan rounded text-xs hover:bg-accent-cyan/30 disabled:opacity-50">
+            {testing === 'pushover' ? 'Sending...' : '🧪 Test Pushover'}
+          </button>
+          {testResult?.channel === 'pushover' && <div className={`text-xs mt-1 ${testResult.ok ? 'text-green-400' : 'text-red-400'}`}>{testResult.msg}</div>}
         </ChannelCard>
+
+        <ChannelCard title="Email (SMTP)" icon="📧" enabled={email.enabled} onToggle={(v) => { setEmail((p) => ({ ...p, enabled: v })); dirty() }}>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm text-text-secondary mb-1">SMTP Host</label>
+              <TextInput value={email.smtp_host} onChange={(v) => { setEmail((p) => ({ ...p, smtp_host: v })); dirty() }} placeholder="smtp.gmail.com" />
+            </div>
+            <div>
+              <label className="block text-sm text-text-secondary mb-1">Port</label>
+              <NumberInput value={email.smtp_port} onChange={(v) => { setEmail((p) => ({ ...p, smtp_port: v })); dirty() }} min={25} max={65535} />
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm text-text-secondary mb-1">Username</label>
+            <TextInput value={email.smtp_user} onChange={(v) => { setEmail((p) => ({ ...p, smtp_user: v })); dirty() }} />
+          </div>
+          <div>
+            <label className="block text-sm text-text-secondary mb-1">Password</label>
+            <SecretInput value={email.smtp_pass} onChange={(v) => { setEmail((p) => ({ ...p, smtp_pass: v })); dirty() }} />
+          </div>
+          <div>
+            <label className="block text-sm text-text-secondary mb-1">From Address</label>
+            <TextInput value={email.from_address} onChange={(v) => { setEmail((p) => ({ ...p, from_address: v })); dirty() }} placeholder="watchtower@example.com" />
+          </div>
+          <div>
+            <label className="block text-sm text-text-secondary mb-1">Recipients (comma-separated)</label>
+            <TextInput value={email.recipients.join(', ')} onChange={(v) => { setEmail((p) => ({ ...p, recipients: v.split(',').map(s => s.trim()).filter(Boolean) })); dirty() }} placeholder="admin@example.com, ops@example.com" />
+          </div>
+          <div>
+            <label className="block text-sm text-text-secondary mb-1">Subject Prefix</label>
+            <TextInput value={email.subject_prefix} onChange={(v) => { setEmail((p) => ({ ...p, subject_prefix: v })); dirty() }} />
+          </div>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" checked={email.use_tls} onChange={(e) => { setEmail((p) => ({ ...p, use_tls: e.target.checked })); dirty() }}
+              className="rounded border-border-default bg-bg-primary text-accent-cyan focus:ring-accent-cyan/40" />
+            <span className="text-sm text-text-secondary">Use TLS</span>
+          </label>
+          <button onClick={() => handleTest('email')} disabled={testing === 'email'} className="mt-2 px-3 py-1.5 bg-accent-cyan/20 text-accent-cyan rounded text-xs hover:bg-accent-cyan/30 disabled:opacity-50">
+            {testing === 'email' ? 'Sending...' : '🧪 Test Email'}
+          </button>
+          {testResult?.channel === 'email' && <div className={`text-xs mt-1 ${testResult.ok ? 'text-green-400' : 'text-red-400'}`}>{testResult.msg}</div>}
+        </ChannelCard>
+      </div>
+
+      {/* Delivery History */}
+      <div className="mt-6">
+        <h3 className="text-sm font-semibold text-text-primary mb-3">Delivery History</h3>
+        <NotificationHistory />
       </div>
     </SettingsTab>
   )

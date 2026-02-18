@@ -1,15 +1,45 @@
 """Authentication API routes."""
 
+import logging
+import time
 from pathlib import Path
 
 import yaml
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from ..auth import UserRole, create_token, get_current_user, hash_password, verify_password
 from ..config import config, load_yaml_config, settings
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+# ── In-memory rate limiter ───────────────────────────────────────────────────
+# Max 5 login attempts per IP per 5 minutes.
+_LOGIN_ATTEMPTS: dict[str, list[float]] = {}
+_RATE_LIMIT_MAX = 5
+_RATE_LIMIT_WINDOW = 300  # seconds
+
+
+def _check_rate_limit(ip: str) -> None:
+    """Raise 429 if IP exceeds login attempt threshold."""
+    now = time.monotonic()
+    # Clean up expired entries opportunistically
+    expired_ips = [k for k, v in _LOGIN_ATTEMPTS.items() if v and v[-1] < now - _RATE_LIMIT_WINDOW]
+    for k in expired_ips:
+        del _LOGIN_ATTEMPTS[k]
+
+    attempts = _LOGIN_ATTEMPTS.get(ip, [])
+    # Keep only attempts within the window
+    attempts = [t for t in attempts if t > now - _RATE_LIMIT_WINDOW]
+    _LOGIN_ATTEMPTS[ip] = attempts
+
+    if len(attempts) >= _RATE_LIMIT_MAX:
+        raise HTTPException(status_code=429, detail="Too many login attempts. Try again later.")
+
+    attempts.append(now)
+    _LOGIN_ATTEMPTS[ip] = attempts
 
 
 class LoginRequest(BaseModel):
@@ -48,15 +78,30 @@ def _persist_admin_password_hash(password_hash: str) -> None:
 
 
 @router.post("/login")
-async def login(payload: LoginRequest):
+async def login(payload: LoginRequest, request: Request):
     """Authenticate an admin user and return JWT token."""
+    client_ip = request.client.host if request.client else "unknown"
+    _check_rate_limit(client_ip)
+
     if payload.username != config.auth.admin_user:
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     initial_setup = False
 
     if not config.auth.admin_password_hash:
-        # Initial setup flow: accept any password once and persist hash.
+        # ── Initial setup (bootstrap) ────────────────────────────────────
+        # This is intentional: the first person to access a fresh install
+        # IS the admin (self-hosted tool). We require a minimum password
+        # length and log a warning so it's auditable.
+        if len(payload.password) < 8:
+            raise HTTPException(
+                status_code=400,
+                detail="Password must be at least 8 characters for initial setup.",
+            )
+        logger.warning(
+            "Initial admin password set via first-login bootstrap from %s",
+            client_ip,
+        )
         password_hash = hash_password(payload.password)
         _persist_admin_password_hash(password_hash)
         initial_setup = True
