@@ -3,7 +3,7 @@ import { Handle, Position } from '@xyflow/react'
 
 interface ExternalNodeData {
   label: string
-  type: 'campus' | 'ix' | 'cloud'
+  type: 'campus' | 'ix' | 'cloud' | 'wan'
   icon: string
 }
 
@@ -18,6 +18,12 @@ const typeStyles = {
     glow: 'shadow-[0_0_15px_rgba(217,119,6,0.3)]',
     icon: 'text-amber-400',
     badge: 'text-amber-400/80',
+  },
+  wan: {
+    border: 'border-yellow-400/60',
+    glow: 'shadow-[0_0_15px_rgba(250,204,21,0.4)]',
+    icon: 'text-yellow-400',
+    badge: 'text-yellow-400/80',
   },
   ix: {
     border: 'border-purple-500/60',
@@ -74,6 +80,12 @@ function ExternalIcon({ type, colorClass }: { type: string; colorClass: string }
       return (
         <svg className={iconClass} fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+        </svg>
+      )
+    case 'server':
+      return (
+        <svg className={iconClass} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" />
         </svg>
       )
     case 'globe':
