@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { fetchSpeedtest } from '../../api/endpoints'
+import { apiClient } from '../../api/client'
 
 interface SpeedtestResult {
   timestamp: string
@@ -78,18 +79,7 @@ export default function SpeedtestWidget() {
     setError(null)
 
     try {
-      const response = await fetch('/api/speedtest/trigger', { method: 'POST' })
-
-      if (response.status === 429) {
-        const data = await response.json()
-        setError(data.detail)
-        setState('ready')
-        return
-      }
-
-      if (!response.ok) {
-        throw new Error('Failed to trigger test')
-      }
+      await apiClient.post('/speedtest/trigger')
 
       // Start cooldown
       setCooldown(60)
@@ -97,22 +87,49 @@ export default function SpeedtestWidget() {
       // The result will come via WebSocket, but also poll after a delay
       setTimeout(async () => {
         try {
-          const pollResponse = await fetch('/api/speedtest')
-          const data = await pollResponse.json()
-          if (data.status !== 'no_data') {
-            setResult(data)
+          const response = await apiClient.get('/speedtest')
+          if (response.data.status !== 'no_data') {
+            setResult(response.data)
             setState('ready')
           }
         } catch {
           // Ignore: WebSocket should have updated us
         }
       }, 30000) // Poll after 30s as backup
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('Failed to trigger speedtest:', err)
+      // Check for rate limit
+      if (err && typeof err === 'object' && 'response' in err) {
+        const axiosErr = err as { response?: { status?: number; data?: { detail?: string } } }
+        if (axiosErr.response?.status === 429) {
+          setError(axiosErr.response.data?.detail || 'Rate limited')
+          setState('ready')
+          return
+        }
+      }
       setError('Failed to start test')
       setState('ready')
     }
   }, [state, cooldown])
+
+  // Export CSV
+  const handleExport = useCallback(async () => {
+    try {
+      const response = await apiClient.get('/speedtest/export', {
+        responseType: 'text',
+      })
+      const dataUri = 'data:text/csv;charset=utf-8,' + encodeURIComponent(response.data)
+      const link = document.createElement('a')
+      link.href = dataUri
+      link.setAttribute('download', 'speedtest_history.csv')
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+    } catch (err) {
+      console.error('Failed to export CSV:', err)
+      alert('Failed to export CSV. Please try again.')
+    }
+  }, [])
 
   // Format time ago
   const timeAgo = (timestamp: string): string => {
@@ -232,14 +249,13 @@ export default function SpeedtestWidget() {
                 >
                   {cooldown > 0 ? `Wait ${cooldown}s` : 'Run Test'}
                 </button>
-                <a
-                  href="/api/speedtest/export"
-                  download
+                <button
+                  onClick={handleExport}
                   className="px-3 py-2 text-sm bg-bg-tertiary hover:bg-bg-secondary text-text-primary rounded-lg transition-colors flex items-center"
                   title="Export CSV"
                 >
                   <ExportIcon />
-                </a>
+                </button>
               </div>
 
               {/* Error display */}
