@@ -429,6 +429,7 @@ function getClusterDefaultPosition(
   }
 
   // Auto-layout: arrange clusters in a grid pattern
+  // Start at x=250 to leave room for external links on the left side
   const cols = Math.min(4, Math.ceil(Math.sqrt(totalClusters)))
   const spacingX = 350
   const spacingY = 300
@@ -436,7 +437,7 @@ function getClusterDefaultPosition(
   const row = Math.floor(index / cols)
 
   return {
-    x: 150 + col * spacingX,
+    x: 250 + col * spacingX,
     y: 100 + row * spacingY,
   }
 }
@@ -500,31 +501,51 @@ function topologyToNodes(
   })
 
   // Create external endpoint nodes from external links
-  // Position external nodes above the edge tier for clean topology
+  // Position external nodes on the LEFT side in a vertical chain
   const externalEndpoints = new Map<string, { label: string; type: string; icon: string; x: number; y: number }>()
-  let externalIndex = 0
+
+  // Build ordered list of external labels by following the chain
+  const orderedLabels: string[] = []
+  const seenLabels = new Set<string>()
+
+  topology.external_links.forEach((link) => {
+    // Add source label if it exists and not seen
+    if (link.source.label && !seenLabels.has(link.source.label)) {
+      orderedLabels.push(link.source.label)
+      seenLabels.add(link.source.label)
+    }
+    // Add target label if not seen
+    if (link.target.label && !seenLabels.has(link.target.label)) {
+      orderedLabels.push(link.target.label)
+      seenLabels.add(link.target.label)
+    }
+  })
+
+  // Position external nodes vertically on the left side
+  const externalStartX = -200  // Left side of canvas
+  const externalStartY = 50
+  const externalSpacingY = 120
 
   topology.external_links.forEach((link) => {
     if (!externalEndpoints.has(link.target.label)) {
-      const isCloud = link.target.type === 'cloud'
+      const index = orderedLabels.indexOf(link.target.label)
       externalEndpoints.set(link.target.label, {
         label: link.target.label,
         type: link.target.type,
         icon: link.target.icon,
-        // Place cloud/WAN endpoints above edge, campus endpoints to the right
-        x: isCloud ? 300 + externalIndex * 280 : 1050,
-        y: isCloud ? -120 : -50,
+        x: externalStartX,
+        y: externalStartY + index * externalSpacingY,
       })
-      externalIndex++
     }
 
     if (link.source.label && !externalEndpoints.has(link.source.label)) {
+      const index = orderedLabels.indexOf(link.source.label)
       externalEndpoints.set(link.source.label, {
         label: link.source.label,
         type: 'campus',
         icon: 'building',
-        x: 1050,
-        y: -50,
+        x: externalStartX,
+        y: externalStartY + index * externalSpacingY,
       })
     }
   })
