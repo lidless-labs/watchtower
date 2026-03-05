@@ -6,7 +6,7 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException
 
 from ..cache import redis_cache
-from ..config import settings, load_config
+from ..config import settings, get_config
 from ..polling.aggregator import get_aggregated_topology
 from ..polling.scheduler import CACHE_ALERTS
 from ..models.alert import Alert, AlertStatus, AlertSeverity, AlertSummary
@@ -35,7 +35,7 @@ async def _notify_new_alerts(alerts: list[Alert]) -> None:
         return
 
     try:
-        config_dict = load_config().model_dump()
+        config_dict = get_config().model_dump()
     except Exception:
         _previously_seen_alerts = current_ids
         return
