@@ -6,6 +6,7 @@ type DocSection =
   | 'devices'
   | 'portgrid'
   | 'alerts'
+  | 'settings'
   | 'integrations'
   | 'websocket'
   | 'faq'
@@ -22,6 +23,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'devices', label: 'Device Monitoring', icon: '🖥️' },
   { id: 'portgrid', label: 'Port Grid', icon: '🔌' },
   { id: 'alerts', label: 'Alerts', icon: '🔔' },
+  { id: 'settings', label: 'Settings', icon: '⚙️' },
   { id: 'integrations', label: 'Integrations', icon: '🔗' },
   { id: 'websocket', label: 'WebSocket API', icon: '⚡' },
   { id: 'faq', label: 'FAQ', icon: '❓' },
@@ -68,7 +70,7 @@ function OverviewSection() {
     <div>
       <SectionHeading>📖 Overview</SectionHeading>
       <Paragraph>
-        MockWatchtower is a Network Operations Center (NOC) dashboard designed for real-time
+        Watchtower is a Network Operations Center (NOC) dashboard designed for real-time
         monitoring and visualization of network infrastructure. It provides an interactive topology
         canvas, device monitoring, port-level visibility, and integration with popular network
         management tools.
@@ -78,12 +80,14 @@ function OverviewSection() {
       <ul className="mb-4">
         <ListItem>Interactive drag-and-drop topology canvas with L2/L3 views</ListItem>
         <ListItem>Real-time device status monitoring via WebSocket</ListItem>
-        <ListItem>Physical switch port grid visualization</ListItem>
-        <ListItem>Alert system with severity levels and toast notifications</ListItem>
+        <ListItem>Physical switch port grid visualization (Cisco-style)</ListItem>
+        <ListItem>Alert system with severity levels and notifications (Discord, Pushover, Email)</ListItem>
         <ListItem>Integration with LibreNMS, Netdisco, and Proxmox</ListItem>
         <ListItem>Internet speed testing with historical tracking</ListItem>
-        <ListItem>YAML-based topology configuration</ListItem>
-        <ListItem>Full offline demo mode with simulated data</ListItem>
+        <ListItem>Port group traffic monitoring (aggregate bandwidth by description)</ListItem>
+        <ListItem>YAML-based topology configuration with auto-discovery</ListItem>
+        <ListItem>JWT authentication with role-based access control</ListItem>
+        <ListItem>InfluxDB integration for historical metrics and graphs</ListItem>
       </ul>
 
       <SubHeading>Architecture</SubHeading>
@@ -96,7 +100,9 @@ function OverviewSection() {
     │
     ├── REST API ──→ FastAPI ──→ Polling Engines ──→ LibreNMS / Netdisco / Proxmox
     │
-    └── WebSocket ──→ FastAPI ──→ Real-time Events (status changes, alerts, speedtest)`}</CodeBlock>
+    ├── WebSocket ──→ FastAPI ──→ Real-time Events (status changes, alerts, speedtest)
+    │
+    └── InfluxDB ──→ Historical Metrics ──→ Charts & Graphs`}</CodeBlock>
     </div>
   )
 }
@@ -156,13 +162,76 @@ function TopologySection() {
       <SubHeading>Connections</SubHeading>
       <Paragraph>
         Most connections are auto-discovered via CDP/LLDP, but you can define manual connections
-        for devices that don't participate in neighbor discovery.
+        for devices that don't participate in neighbor discovery (firewalls, servers, APs).
       </Paragraph>
       <CodeBlock title="config/topology.yaml">{`connections:
-  - from: fw-1
-    to: sw-core-1
-    from_port: ethernet1/1
-    to_port: GigabitEthernet1/0/1`}</CodeBlock>
+  - id: fw1-to-sw1
+    source: { device: fw-1, port: ethernet1/1 }
+    target: { device: sw-core-1, port: Gi1/0/1 }
+    connection_type: uplink
+    speed: 1000
+    description: "Firewall Outside Interface"`}</CodeBlock>
+
+      <SubHeading>External Links</SubHeading>
+      <Paragraph>
+        Define WAN connections to external networks, ISPs, or other sites. External links appear
+        on the left side of the topology canvas and are color-coded by type.
+      </Paragraph>
+      <CodeBlock title="config/topology.yaml">{`external_links:
+  # First hop from your switch
+  - id: sw-to-campus
+    source: { device: sw-core-1, port: Gi1/0/48 }
+    target:
+      label: Campus Router
+      type: campus      # amber color
+      icon: building
+    speed: 10000
+
+  # Chain to WAN (yellow)
+  - id: campus-to-wan
+    source: { label: Campus Router }
+    target:
+      label: ISP Gateway
+      type: wan          # yellow color
+      icon: server
+    speed: 10000
+
+  # Chain to Internet (purple then cyan)
+  - id: wan-to-ix
+    source: { label: ISP Gateway }
+    target:
+      label: Internet Exchange
+      type: ix           # purple color
+      icon: globe
+    speed: 100000
+
+  - id: ix-to-internet
+    source: { label: Internet Exchange }
+    target:
+      label: Internet
+      type: cloud        # cyan color
+      icon: cloud
+    speed: 100000`}</CodeBlock>
+
+      <SubHeading>External Link Types</SubHeading>
+      <div className="grid grid-cols-2 gap-3 mb-4">
+        <div className="flex items-center gap-2 p-3 bg-bg-tertiary rounded-lg">
+          <div className="w-3 h-3 rounded-full bg-amber-500" />
+          <span className="text-text-secondary text-sm"><strong>campus</strong> — Campus/building connections</span>
+        </div>
+        <div className="flex items-center gap-2 p-3 bg-bg-tertiary rounded-lg">
+          <div className="w-3 h-3 rounded-full bg-yellow-400" />
+          <span className="text-text-secondary text-sm"><strong>wan</strong> — WAN/ISP connections</span>
+        </div>
+        <div className="flex items-center gap-2 p-3 bg-bg-tertiary rounded-lg">
+          <div className="w-3 h-3 rounded-full bg-purple-500" />
+          <span className="text-text-secondary text-sm"><strong>ix</strong> — Internet exchange points</span>
+        </div>
+        <div className="flex items-center gap-2 p-3 bg-bg-tertiary rounded-lg">
+          <div className="w-3 h-3 rounded-full bg-cyan-500" />
+          <span className="text-text-secondary text-sm"><strong>cloud</strong> — Internet/cloud endpoints</span>
+        </div>
+      </div>
     </div>
   )
 }
@@ -276,6 +345,50 @@ function AlertsSection() {
       <Paragraph>
         The bell icon in the header shows the count of active alerts. Click it to review all
         current alerts. Alerts are synced in real-time via WebSocket.
+      </Paragraph>
+    </div>
+  )
+}
+
+function SettingsSection() {
+  return (
+    <div>
+      <SectionHeading>⚙️ Settings</SectionHeading>
+      <Paragraph>
+        Access the Settings page from the gear icon in the header. Settings are organized into
+        tabs for different configuration areas.
+      </Paragraph>
+
+      <SubHeading>Authentication</SubHeading>
+      <Paragraph>
+        Watchtower uses JWT-based authentication. Default credentials are <code className="text-accent-cyan bg-bg-tertiary px-1.5 py-0.5 rounded text-sm">admin</code> / <code className="text-accent-cyan bg-bg-tertiary px-1.5 py-0.5 rounded text-sm">admin</code>.
+        Change your password immediately after first login. The JWT secret in <code className="text-accent-cyan bg-bg-tertiary px-1.5 py-0.5 rounded text-sm">config/config.yaml</code> should
+        also be changed to a random string for production.
+      </Paragraph>
+
+      <SubHeading>Notifications</SubHeading>
+      <Paragraph>
+        Configure alert notifications through multiple channels:
+      </Paragraph>
+      <ul className="mb-4">
+        <ListItem><strong>Discord</strong> — Send alerts to a Discord channel via webhook URL</ListItem>
+        <ListItem><strong>Pushover</strong> — Push notifications to mobile devices</ListItem>
+        <ListItem><strong>Email</strong> — SMTP-based email alerts with configurable recipients</ListItem>
+      </ul>
+      <Paragraph>
+        Each channel can be enabled/disabled independently and tested from the Settings UI.
+      </Paragraph>
+
+      <SubHeading>Discovery</SubHeading>
+      <Paragraph>
+        The Discovery tab shows devices found in LibreNMS that aren't yet in your topology
+        configuration. Review discovered devices and add them to your topology with a single click.
+      </Paragraph>
+
+      <SubHeading>User Management</SubHeading>
+      <Paragraph>
+        Administrators can manage user accounts, reset passwords, and control access levels.
+        Currently supports admin and viewer roles.
       </Paragraph>
     </div>
   )
@@ -433,9 +546,10 @@ function FAQSection() {
         <div>
           <SubHeading>Can I use Watchtower without LibreNMS?</SubHeading>
           <Paragraph>
-            Yes! Watchtower includes a full demo mode with simulated data. For production without
-            LibreNMS, you would need to implement custom polling or use SNMP directly (planned for
-            a future release).
+            LibreNMS is the primary data source for device status, health metrics, and interface
+            statistics. Without LibreNMS, you would need to implement custom polling or use SNMP
+            directly (planned for a future release). Proxmox integration works independently for
+            VM/LXC monitoring.
           </Paragraph>
         </div>
 
@@ -469,8 +583,10 @@ function FAQSection() {
         <div>
           <SubHeading>Is there authentication?</SubHeading>
           <Paragraph>
-            Authentication is planned for Phase 7 (JWT login with protected routes). Currently,
-            Watchtower should be deployed behind a VPN or reverse proxy with authentication.
+            Yes! Watchtower includes JWT-based authentication with secure login. Default credentials
+            are <code className="text-accent-cyan bg-bg-tertiary px-1.5 py-0.5 rounded text-sm">admin</code> / <code className="text-accent-cyan bg-bg-tertiary px-1.5 py-0.5 rounded text-sm">admin</code> —
+            change these immediately after first login via the Settings page. API endpoints are protected
+            and require a valid JWT token in the Authorization header.
           </Paragraph>
         </div>
 
@@ -492,6 +608,7 @@ const SECTION_COMPONENTS: Record<DocSection, () => JSX.Element> = {
   devices: DeviceMonitoringSection,
   portgrid: PortGridSection,
   alerts: AlertsSection,
+  settings: SettingsSection,
   integrations: IntegrationsSection,
   websocket: WebSocketSection,
   faq: FAQSection,
