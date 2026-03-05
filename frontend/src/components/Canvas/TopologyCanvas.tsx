@@ -416,56 +416,36 @@ function getExpandedDevicePositions(
     }
   })
 }
-
-// Hierarchical tier mapping for network topology layout
-const CLUSTER_TIER: Record<string, number> = {
-  edge: 0,     // Security/firewall at top
-  core: 1,     // Core backbone below edge
-  distribution: 2, // Distribution/aggregation
-  wireless: 3, // Access layer (left)
-  proxmox: 3,  // Servers (right)
-  branch: 1,   // Separate site, aligned with core tier
-}
-
-// Generate automatic layout positions for clusters if not defined well
+// Generate automatic layout positions for clusters
 function getClusterDefaultPosition(
   index: number,
   totalClusters: number,
-  cluster: Cluster
+  cluster: Cluster,
+  forceAutoLayout: boolean = false
 ): { x: number; y: number } {
-  // If cluster has a reasonable position from config, use it
-  if (cluster.position.x > 0 || cluster.position.y > 0) {
+  // If cluster has a reasonable position from config and we're not forcing auto-layout, use it
+  if (!forceAutoLayout && (cluster.position.x > 0 || cluster.position.y > 0)) {
     return { x: cluster.position.x, y: cluster.position.y }
   }
 
-  // Try hierarchy-aware layout based on cluster id
-  const tier = CLUSTER_TIER[cluster.id]
-  if (tier !== undefined) {
-    const tierY = 80 + tier * 220
-    // Offset access-layer clusters horizontally
-    if (cluster.id === 'wireless') return { x: 200, y: tierY }
-    if (cluster.id === 'proxmox') return { x: 800, y: tierY }
-    if (cluster.id === 'branch') return { x: 1050, y: tierY }
-    return { x: 500, y: tierY }
-  }
-
-  // Fallback: generate a grid layout for unknown clusters
-  const cols = Math.ceil(Math.sqrt(totalClusters))
-  const spacingX = 400
-  const spacingY = 250
+  // Auto-layout: arrange clusters in a grid pattern
+  const cols = Math.min(4, Math.ceil(Math.sqrt(totalClusters)))
+  const spacingX = 350
+  const spacingY = 300
   const col = index % cols
   const row = Math.floor(index / cols)
 
   return {
-    x: 300 + col * spacingX,
-    y: 150 + row * spacingY,
+    x: 150 + col * spacingX,
+    y: 100 + row * spacingY,
   }
 }
 
 function topologyToNodes(
   topology: Topology,
   expandedClusters: Set<string>,
-  savedPositions: Record<string, { x: number; y: number }>
+  savedPositions: Record<string, { x: number; y: number }>,
+  forceAutoLayout: boolean = false
 ): Node[] {
   const nodes: Node[] = []
 
@@ -476,8 +456,8 @@ function topologyToNodes(
       .filter(Boolean)
     const deviceIds = clusterDevices.map((d) => d.id)
 
-    // Get default position for this cluster
-    const defaultPos = getClusterDefaultPosition(index, topology.clusters.length, cluster)
+    // Get default position for this cluster (force auto-layout ignores config positions)
+    const defaultPos = getClusterDefaultPosition(index, topology.clusters.length, cluster, forceAutoLayout)
 
     if (expandedClusters.has(cluster.id)) {
       // Use saved cluster position or default for calculating device grid
@@ -818,6 +798,7 @@ function TopologyCanvasInner() {
   const { fitView } = useReactFlow()
 
   const [resetCounter, setResetCounter] = useState(0)
+  const [useAutoLayout, setUseAutoLayout] = useState(false)
   const [showMermaidModal, setShowMermaidModal] = useState(false)
   const [mermaidDiagram, setMermaidDiagram] = useState('')
   const [l3Loading, setL3Loading] = useState(false)
@@ -863,20 +844,20 @@ function TopologyCanvasInner() {
     // L2 mode
     if (!topology) return []
 
-    let nodes = topologyToNodes(topology, expandedClusters, savedPositionsRef.current)
+    let nodes = topologyToNodes(topology, expandedClusters, savedPositionsRef.current, useAutoLayout)
 
-    // Only resolve overlaps if clusters changed (not on initial load with saved positions)
+    // Only resolve overlaps if clusters changed or layout was reset
     const expandedChanged =
       expandedClusters.size !== prevExpandedRef.current.size ||
       [...expandedClusters].some((id) => !prevExpandedRef.current.has(id))
 
-    if (expandedChanged || resetCounter > 0) {
+    if (expandedChanged || resetCounter > 0 || useAutoLayout) {
       nodes = resolveOverlaps(nodes, expandedClusters)
     }
 
     return nodes
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [topology, l3Topology, viewMode, expandedClusters, selectedVlans, resetCounter])
+  }, [topology, l3Topology, viewMode, expandedClusters, selectedVlans, resetCounter, useAutoLayout])
 
   const initialEdges = useMemo(() => {
     // L3 mode
@@ -909,14 +890,19 @@ function TopologyCanvasInner() {
     [onNodesChange]
   )
 
-  // Reset layout to defaults
+  // Reset layout - auto-arrange all nodes in a clean grid
   const handleResetLayout = useCallback(() => {
     clearSavedPositions()
     savedPositionsRef.current = {}
     prevExpandedRef.current = new Set()
+    setUseAutoLayout(true)
     setResetCounter((c) => c + 1)
-    // Center viewport on the reset layout after nodes update
-    setTimeout(() => fitView({ padding: 0.2, duration: 300 }), 100)
+    // Center viewport on the reset layout after nodes update, then turn off auto-layout
+    setTimeout(() => {
+      fitView({ padding: 0.2, duration: 300 })
+      // Save the new auto-layout positions and turn off auto-layout mode
+      setTimeout(() => setUseAutoLayout(false), 100)
+    }, 100)
   }, [fitView])
 
   // Export topology as Mermaid diagram
@@ -950,14 +936,14 @@ function TopologyCanvasInner() {
 
     // L2 mode
     if (topology) {
-      let newNodes = topologyToNodes(topology, expandedClusters, savedPositionsRef.current)
+      let newNodes = topologyToNodes(topology, expandedClusters, savedPositionsRef.current, useAutoLayout)
 
       // Check if expansion state changed
       const expandedChanged =
         expandedClusters.size !== prevExpandedRef.current.size ||
         [...expandedClusters].some((id) => !prevExpandedRef.current.has(id))
 
-      if (expandedChanged) {
+      if (expandedChanged || useAutoLayout) {
         // Resolve overlaps when clusters expand/collapse
         newNodes = resolveOverlaps(newNodes, expandedClusters)
 
@@ -977,7 +963,7 @@ function TopologyCanvasInner() {
       setNodes(newNodes)
       setEdges(topologyToEdges(topology, expandedClusters, speedtestStatus))
     }
-  }, [topology, l3Topology, viewMode, expandedClusters, selectedVlans, speedtestStatus, setNodes, setEdges, resetCounter, fitView])
+  }, [topology, l3Topology, viewMode, expandedClusters, selectedVlans, speedtestStatus, setNodes, setEdges, resetCounter, useAutoLayout, fitView])
 
   // Single click: select device for sidebar details
   const onNodeClick = useCallback(
