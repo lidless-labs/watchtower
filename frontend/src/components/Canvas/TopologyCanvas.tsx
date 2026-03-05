@@ -25,7 +25,9 @@ import TrafficEdge from './edges/TrafficEdge'
 import PhysicalLinkEdge from './edges/PhysicalLinkEdge'
 import MermaidModal from './MermaidModal'
 import { fetchL3Topology } from '../../api/endpoints'
-import type { Topology, Cluster } from '../../types/topology'
+import { applyDagreLayout } from '../../utils/dagreLayout'
+import { bundleEdges } from './edges/edgeBundleUtils'
+import type { Topology } from '../../types/topology'
 import type { L3Topology, ViewMode } from '../../types/vlan'
 
 // Sanitize ID for Mermaid (only alphanumeric and dashes allowed)
@@ -149,16 +151,6 @@ const edgeTypes = {
 
 const STORAGE_KEY = 'watchtower-node-positions'
 
-// Node size constants for collision detection
-const NODE_SIZES: Record<string, { width: number; height: number }> = {
-  cluster: { width: 180, height: 120 },
-  device: { width: 160, height: 80 },
-  external: { width: 140, height: 100 },
-  vlanGroup: { width: 220, height: 150 },
-}
-
-const PADDING = 40 // Padding between nodes
-
 // Load saved positions from localStorage
 function loadSavedPositions(): Record<string, { x: number; y: number }> {
   try {
@@ -187,297 +179,30 @@ function clearSavedPositions() {
   }
 }
 
-// Bounding box type
-interface BoundingBox {
-  id: string
-  clusterId?: string // For device nodes, track which cluster they belong to
-  x: number
-  y: number
-  width: number
-  height: number
-  right: number
-  bottom: number
-}
-
-// Calculate bounding box for a node
-function getNodeBoundingBox(node: Node): BoundingBox {
-  const size = NODE_SIZES[node.type || 'cluster'] || NODE_SIZES.cluster
-  return {
-    id: node.id,
-    clusterId: (node.data as { clusterId?: string })?.clusterId,
-    x: node.position.x - PADDING,
-    y: node.position.y - PADDING,
-    width: size.width + PADDING * 2,
-    height: size.height + PADDING * 2,
-    right: node.position.x + size.width + PADDING,
-    bottom: node.position.y + size.height + PADDING,
-  }
-}
-
-// Check if two bounding boxes overlap
-function boxesOverlap(a: BoundingBox, b: BoundingBox): boolean {
-  return !(a.right < b.x || b.right < a.x || a.bottom < b.y || b.bottom < a.y)
-}
-
-// Calculate how much to push box B away from box A
-function calculatePushVector(
-  a: BoundingBox,
-  b: BoundingBox
-): { x: number; y: number } {
-  // Calculate overlap on each axis
-  const overlapX =
-    Math.min(a.right, b.right) - Math.max(a.x, b.x)
-  const overlapY =
-    Math.min(a.bottom, b.bottom) - Math.max(a.y, b.y)
-
-  // Calculate centers
-  const aCenterX = a.x + a.width / 2
-  const aCenterY = a.y + a.height / 2
-  const bCenterX = b.x + b.width / 2
-  const bCenterY = b.y + b.height / 2
-
-  // Push in the direction of least overlap, away from A's center
-  if (overlapX < overlapY) {
-    // Push horizontally
-    const direction = bCenterX > aCenterX ? 1 : -1
-    return { x: overlapX * direction + PADDING * direction, y: 0 }
-  } else {
-    // Push vertically
-    const direction = bCenterY > aCenterY ? 1 : -1
-    return { x: 0, y: overlapY * direction + PADDING * direction }
-  }
-}
-
-// Resolve all overlaps between nodes
-function resolveOverlaps(
-  nodes: Node[],
-  expandedClusterIds: Set<string>
-): Node[] {
-  const result = nodes.map((n) => ({ ...n, position: { ...n.position } }))
-  const maxIterations = 50 // Prevent infinite loops
-  let iteration = 0
-  let hasOverlap = true
-
-  while (hasOverlap && iteration < maxIterations) {
-    hasOverlap = false
-    iteration++
-
-    // Build bounding boxes
-    const boxes = result.map(getNodeBoundingBox)
-
-    // Group device nodes by their cluster
-    const clusterDeviceBoxes = new Map<string, BoundingBox[]>()
-    boxes.forEach((box) => {
-      if (box.clusterId) {
-        const existing = clusterDeviceBoxes.get(box.clusterId) || []
-        existing.push(box)
-        clusterDeviceBoxes.set(box.clusterId, existing)
-      }
-    })
-
-    // Calculate expanded cluster bounding boxes (encompasses all device nodes)
-    const expandedClusterBounds = new Map<string, BoundingBox>()
-    clusterDeviceBoxes.forEach((deviceBoxes, clusterId) => {
-      if (deviceBoxes.length > 0) {
-        const minX = Math.min(...deviceBoxes.map((b) => b.x))
-        const minY = Math.min(...deviceBoxes.map((b) => b.y))
-        const maxRight = Math.max(...deviceBoxes.map((b) => b.right))
-        const maxBottom = Math.max(...deviceBoxes.map((b) => b.bottom))
-        expandedClusterBounds.set(clusterId, {
-          id: clusterId,
-          x: minX,
-          y: minY,
-          width: maxRight - minX,
-          height: maxBottom - minY,
-          right: maxRight,
-          bottom: maxBottom,
-        })
-      }
-    })
-
-    // Check each pair of "groups" (collapsed clusters, expanded cluster bounds, externals)
-    for (let i = 0; i < result.length; i++) {
-      const nodeA = result[i]
-      const boxA = boxes[i]
-
-      // Skip device nodes - they move with their cluster
-      if (nodeA.type === 'device') continue
-
-      // Skip expanded clusters since they become device nodes
-      if (nodeA.type === 'cluster' && expandedClusterIds.has(nodeA.id)) {
-        continue
-      }
-
-      for (let j = i + 1; j < result.length; j++) {
-        const nodeB = result[j]
-        const boxB = boxes[j]
-
-        // Skip device nodes in same cluster
-        if (nodeB.type === 'device') continue
-
-        // Check for overlap
-        if (boxesOverlap(boxA, boxB)) {
-          hasOverlap = true
-          const push = calculatePushVector(boxA, boxB)
-
-          // Push node B
-          result[j].position.x += push.x
-          result[j].position.y += push.y
-        }
-      }
-    }
-
-    // Now check expanded clusters against other nodes
-    expandedClusterBounds.forEach((clusterBound, clusterId) => {
-      for (let i = 0; i < result.length; i++) {
-        const node = result[i]
-        const box = boxes[i]
-
-        // Skip nodes that belong to this cluster
-        if (node.type === 'device' && (node.data as { clusterId?: string })?.clusterId === clusterId) {
-          continue
-        }
-
-        // Skip other device nodes (they'll move with their cluster)
-        if (node.type === 'device') continue
-
-        // Check if this node overlaps with the expanded cluster
-        if (boxesOverlap(clusterBound, box)) {
-          hasOverlap = true
-          const push = calculatePushVector(clusterBound, box)
-
-          // Push the node
-          result[i].position.x += push.x
-          result[i].position.y += push.y
-        }
-      }
-    })
-
-    // Check expanded clusters against each other
-    const clusterIds = Array.from(expandedClusterBounds.keys())
-    for (let i = 0; i < clusterIds.length; i++) {
-      for (let j = i + 1; j < clusterIds.length; j++) {
-        const boundA = expandedClusterBounds.get(clusterIds[i])!
-        const boundB = expandedClusterBounds.get(clusterIds[j])!
-
-        if (boxesOverlap(boundA, boundB)) {
-          hasOverlap = true
-          const push = calculatePushVector(boundA, boundB)
-
-          // Push all devices in cluster B
-          result.forEach((node) => {
-            if (
-              node.type === 'device' &&
-              (node.data as { clusterId?: string })?.clusterId === clusterIds[j]
-            ) {
-              node.position.x += push.x
-              node.position.y += push.y
-            }
-          })
-        }
-      }
-    }
-  }
-
-  return result
-}
-
-// Calculate positions for expanded device nodes in a grid layout
-function getExpandedDevicePositions(
-  cluster: Cluster,
-  deviceCount: number,
-  savedPositions: Record<string, { x: number; y: number }>,
-  deviceIds: string[]
-): { x: number; y: number }[] {
-  // Use 3 columns for better spacing
-  const cols = Math.min(3, deviceCount)
-  const rows = Math.ceil(deviceCount / cols)
-  const spacingX = 200
-  const spacingY = 120
-
-  // Center the grid on the cluster position
-  const gridWidth = (cols - 1) * spacingX
-  const gridHeight = (rows - 1) * spacingY
-  const startX = cluster.position.x - gridWidth / 2
-  const startY = cluster.position.y - gridHeight / 2
-
-  return Array.from({ length: deviceCount }, (_, i) => {
-    const deviceId = deviceIds[i]
-    // Use saved position if available
-    if (savedPositions[deviceId]) {
-      return savedPositions[deviceId]
-    }
-    // Otherwise calculate grid position
-    const col = i % cols
-    const row = Math.floor(i / cols)
-    return {
-      x: startX + col * spacingX,
-      y: startY + row * spacingY,
-    }
-  })
-}
-// Generate automatic layout positions for clusters
-function getClusterDefaultPosition(
-  index: number,
-  totalClusters: number,
-  cluster: Cluster,
-  forceAutoLayout: boolean = false
-): { x: number; y: number } {
-  // If cluster has a reasonable position from config and we're not forcing auto-layout, use it
-  if (!forceAutoLayout && (cluster.position.x > 0 || cluster.position.y > 0)) {
-    return { x: cluster.position.x, y: cluster.position.y }
-  }
-
-  // Auto-layout: arrange clusters in a grid pattern
-  // Start at x=250 to leave room for external links on the left side
-  const cols = Math.min(4, Math.ceil(Math.sqrt(totalClusters)))
-  const spacingX = 350
-  const spacingY = 300
-  const col = index % cols
-  const row = Math.floor(index / cols)
-
-  return {
-    x: 250 + col * spacingX,
-    y: 100 + row * spacingY,
-  }
-}
+// Placeholder position - dagre will calculate actual positions
+const PLACEHOLDER_POSITION = { x: 0, y: 0 }
 
 function topologyToNodes(
   topology: Topology,
   expandedClusters: Set<string>,
-  savedPositions: Record<string, { x: number; y: number }>,
-  forceAutoLayout: boolean = false
+  savedPositions: Record<string, { x: number; y: number }>
 ): Node[] {
   const nodes: Node[] = []
 
   // Create cluster or device nodes based on expansion state
-  topology.clusters.forEach((cluster, index) => {
+  // Note: Positions are placeholders - dagre will calculate actual positions
+  topology.clusters.forEach((cluster) => {
     const clusterDevices = cluster.device_ids
       .map((id) => topology.devices[id])
       .filter(Boolean)
-    const deviceIds = clusterDevices.map((d) => d.id)
-
-    // Get default position for this cluster (force auto-layout ignores config positions)
-    const defaultPos = getClusterDefaultPosition(index, topology.clusters.length, cluster, forceAutoLayout)
 
     if (expandedClusters.has(cluster.id)) {
-      // Use saved cluster position or default for calculating device grid
-      const clusterPos = savedPositions[cluster.id] || defaultPos
-      const clusterWithPos = { ...cluster, position: clusterPos }
-
-      // Render individual device nodes in a grid layout
-      const positions = getExpandedDevicePositions(
-        clusterWithPos,
-        clusterDevices.length,
-        savedPositions,
-        deviceIds
-      )
-
-      clusterDevices.forEach((device, deviceIndex) => {
+      // Render individual device nodes (dagre will position them)
+      clusterDevices.forEach((device) => {
         nodes.push({
           id: device.id,
           type: 'device',
-          position: positions[deviceIndex],
+          position: savedPositions[device.id] || PLACEHOLDER_POSITION,
           data: {
             device,
             clusterId: cluster.id,
@@ -486,12 +211,11 @@ function topologyToNodes(
         })
       })
     } else {
-      // Render collapsed cluster node - use saved position or default
-      const position = savedPositions[cluster.id] || defaultPos
+      // Render collapsed cluster node
       nodes.push({
         id: cluster.id,
         type: 'cluster',
-        position,
+        position: savedPositions[cluster.id] || PLACEHOLDER_POSITION,
         data: {
           cluster,
           devices: clusterDevices,
@@ -501,8 +225,8 @@ function topologyToNodes(
   })
 
   // Create external endpoint nodes from external links
-  // Position external nodes on the LEFT side in a vertical chain
-  const externalEndpoints = new Map<string, { label: string; type: string; icon: string; x: number; y: number }>()
+  // External nodes are positioned on the left side (dagre handles this via applyDagreLayout)
+  const externalEndpoints = new Map<string, { label: string; type: string; icon: string }>()
 
   // Build ordered list of external labels by following the chain
   const orderedLabels: string[] = []
@@ -522,47 +246,48 @@ function topologyToNodes(
   })
 
   // Position external nodes vertically on the left side
-  const externalStartX = -200  // Left side of canvas
+  const externalStartX = -200
   const externalStartY = 50
   const externalSpacingY = 120
 
   topology.external_links.forEach((link) => {
     if (!externalEndpoints.has(link.target.label)) {
-      const index = orderedLabels.indexOf(link.target.label)
       externalEndpoints.set(link.target.label, {
         label: link.target.label,
         type: link.target.type,
         icon: link.target.icon,
-        x: externalStartX,
-        y: externalStartY + index * externalSpacingY,
       })
     }
 
     if (link.source.label && !externalEndpoints.has(link.source.label)) {
-      const index = orderedLabels.indexOf(link.source.label)
       externalEndpoints.set(link.source.label, {
         label: link.source.label,
         type: 'campus',
         icon: 'building',
-        x: externalStartX,
-        y: externalStartY + index * externalSpacingY,
       })
     }
   })
 
-  externalEndpoints.forEach((endpoint, label) => {
-    const nodeId = `external-${label}`
-    const position = savedPositions[nodeId] || { x: endpoint.x, y: endpoint.y }
-    nodes.push({
-      id: nodeId,
-      type: 'external',
-      position,
-      data: {
-        label: endpoint.label,
-        type: endpoint.type,
-        icon: endpoint.icon,
-      },
-    })
+  // Add external nodes with fixed left-side positions
+  let externalIndex = 0
+  orderedLabels.forEach((label) => {
+    const endpoint = externalEndpoints.get(label)
+    if (endpoint) {
+      const nodeId = `external-${label}`
+      const defaultPos = { x: externalStartX, y: externalStartY + externalIndex * externalSpacingY }
+      const position = savedPositions[nodeId] || defaultPos
+      nodes.push({
+        id: nodeId,
+        type: 'external',
+        position,
+        data: {
+          label: endpoint.label,
+          type: endpoint.type,
+          icon: endpoint.icon,
+        },
+      })
+      externalIndex++
+    }
   })
 
   return nodes
@@ -854,7 +579,19 @@ function TopologyCanvasInner() {
     setTimeout(() => fitView({ padding: 0.2, duration: 300 }), 100)
   }, [setViewMode, clearVlanFilter, fitView])
 
-  // Generate nodes and resolve overlaps
+  // Generate edges first (needed for dagre layout)
+  // Edges are bundled to reduce visual clutter when multiple links exist between same nodes
+  const computedEdges = useMemo(() => {
+    if (viewMode === 'l3') {
+      if (!l3Topology) return []
+      return l3TopologyToEdges(l3Topology, selectedVlans)
+    }
+    const edges = topology ? topologyToEdges(topology, expandedClusters, speedtestStatus) : []
+    // Bundle parallel edges between same node pairs
+    return bundleEdges(edges)
+  }, [topology, l3Topology, viewMode, expandedClusters, selectedVlans, speedtestStatus])
+
+  // Generate nodes with dagre hierarchical layout
   const processedNodes = useMemo(() => {
     // L3 mode
     if (viewMode === 'l3') {
@@ -865,33 +602,39 @@ function TopologyCanvasInner() {
     // L2 mode
     if (!topology) return []
 
-    let nodes = topologyToNodes(topology, expandedClusters, savedPositionsRef.current, useAutoLayout)
+    // Build nodes with placeholder positions
+    let nodes = topologyToNodes(topology, expandedClusters, savedPositionsRef.current)
 
-    // Only resolve overlaps if clusters changed or layout was reset
+    // Check if we need to apply dagre layout
     const expandedChanged =
       expandedClusters.size !== prevExpandedRef.current.size ||
       [...expandedClusters].some((id) => !prevExpandedRef.current.has(id))
 
-    if (expandedChanged || resetCounter > 0 || useAutoLayout) {
-      nodes = resolveOverlaps(nodes, expandedClusters)
+    const needsLayout = expandedChanged || resetCounter > 0 || useAutoLayout
+
+    if (needsLayout) {
+      // Apply dagre hierarchical layout
+      nodes = applyDagreLayout(nodes, computedEdges, topology)
+    }
+
+    // Merge saved positions (user-dragged positions override dagre)
+    // Only do this when NOT forcing auto-layout
+    if (!useAutoLayout) {
+      nodes = nodes.map(node => {
+        const savedPos = savedPositionsRef.current[node.id]
+        if (savedPos) {
+          return { ...node, position: savedPos }
+        }
+        return node
+      })
     }
 
     return nodes
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [topology, l3Topology, viewMode, expandedClusters, selectedVlans, resetCounter, useAutoLayout])
-
-  const initialEdges = useMemo(() => {
-    // L3 mode
-    if (viewMode === 'l3') {
-      if (!l3Topology) return []
-      return l3TopologyToEdges(l3Topology, selectedVlans)
-    }
-    // L2 mode
-    return topology ? topologyToEdges(topology, expandedClusters, speedtestStatus) : []
-  }, [topology, l3Topology, viewMode, expandedClusters, selectedVlans, speedtestStatus])
+  }, [topology, l3Topology, viewMode, expandedClusters, selectedVlans, resetCounter, useAutoLayout, computedEdges])
 
   const [nodes, setNodes, onNodesChange] = useNodesState(processedNodes)
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges)
+  const [edges, setEdges, onEdgesChange] = useEdgesState(computedEdges)
 
   // Handle node position changes (dragging)
   const handleNodesChange = useCallback(
@@ -911,7 +654,7 @@ function TopologyCanvasInner() {
     [onNodesChange]
   )
 
-  // Reset layout - auto-arrange all nodes in a clean grid
+  // Reset layout - apply dagre hierarchical layout
   const handleResetLayout = useCallback(() => {
     clearSavedPositions()
     savedPositionsRef.current = {}
@@ -957,7 +700,8 @@ function TopologyCanvasInner() {
 
     // L2 mode
     if (topology) {
-      let newNodes = topologyToNodes(topology, expandedClusters, savedPositionsRef.current, useAutoLayout)
+      const newEdges = topologyToEdges(topology, expandedClusters, speedtestStatus)
+      let newNodes = topologyToNodes(topology, expandedClusters, savedPositionsRef.current)
 
       // Check if expansion state changed
       const expandedChanged =
@@ -965,12 +709,12 @@ function TopologyCanvasInner() {
         [...expandedClusters].some((id) => !prevExpandedRef.current.has(id))
 
       if (expandedChanged || useAutoLayout) {
-        // Resolve overlaps when clusters expand/collapse
-        newNodes = resolveOverlaps(newNodes, expandedClusters)
+        // Apply dagre hierarchical layout
+        newNodes = applyDagreLayout(newNodes, newEdges, topology)
 
-        // Save the new positions after collision resolution
+        // Save the new positions after layout
         newNodes.forEach((node) => {
-          if (node.type === 'cluster' || node.type === 'external') {
+          if (node.type === 'cluster' || node.type === 'external' || node.type === 'device') {
             savedPositionsRef.current[node.id] = { ...node.position }
           }
         })
@@ -978,11 +722,20 @@ function TopologyCanvasInner() {
 
         // Fit view after a short delay to show new layout
         setTimeout(() => fitView({ padding: 0.2, duration: 300 }), 50)
+      } else {
+        // Merge saved positions (user-dragged positions)
+        newNodes = newNodes.map(node => {
+          const savedPos = savedPositionsRef.current[node.id]
+          if (savedPos) {
+            return { ...node, position: savedPos }
+          }
+          return node
+        })
       }
 
       prevExpandedRef.current = new Set(expandedClusters)
       setNodes(newNodes)
-      setEdges(topologyToEdges(topology, expandedClusters, speedtestStatus))
+      setEdges(newEdges)
     }
   }, [topology, l3Topology, viewMode, expandedClusters, selectedVlans, speedtestStatus, setNodes, setEdges, resetCounter, useAutoLayout, fitView])
 
@@ -996,7 +749,7 @@ function TopologyCanvasInner() {
     [selectDevice]
   )
 
-  // Double click: toggle expand/collapse
+  // Double click: toggle expand/collapse cluster inline
   const onNodeDoubleClick = useCallback(
     (_: React.MouseEvent, node: Node) => {
       if (node.type === 'cluster') {

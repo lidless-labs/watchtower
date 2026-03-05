@@ -25,6 +25,8 @@ interface NocState {
   sidebarOpen: boolean
   expandedClusters: Set<string>
   demoMode: boolean
+  detailPanelClusterId: string | null  // ID of cluster shown in detail panel
+  hoveredEdgeId: string | null  // ID of currently hovered edge
 
   // Actions
   setTopology: (topology: Topology) => void
@@ -40,6 +42,13 @@ interface NocState {
   clearSelection: () => void
   setSpeedtestStatus: (status: SpeedtestStatus) => void
   setDemoMode: (demoMode: boolean) => void
+
+  // Detail panel actions
+  openClusterDetail: (clusterId: string) => void
+  closeClusterDetail: () => void
+
+  // Edge hover actions
+  setHoveredEdge: (edgeId: string | null) => void
 
   // L3 actions
   setViewMode: (mode: ViewMode) => void
@@ -66,6 +75,8 @@ export const useNocStore = create<NocState>((set, get) => ({
   sidebarOpen: true,
   expandedClusters: new Set<string>(),
   demoMode: false,
+  detailPanelClusterId: null,
+  hoveredEdgeId: null,
 
   // Actions
   setTopology: (topology) => set({ topology, error: null }),
@@ -166,6 +177,13 @@ export const useNocStore = create<NocState>((set, get) => ({
 
   setSpeedtestStatus: (speedtestStatus) => set({ speedtestStatus }),
   setDemoMode: (demoMode) => set({ demoMode }),
+
+  // Detail panel actions
+  openClusterDetail: (clusterId) => set({ detailPanelClusterId: clusterId }),
+  closeClusterDetail: () => set({ detailPanelClusterId: null }),
+
+  // Edge hover actions
+  setHoveredEdge: (edgeId) => set({ hoveredEdgeId: edgeId }),
 
   // L3 actions
   setViewMode: (viewMode) => set({ viewMode }),
