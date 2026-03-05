@@ -61,7 +61,9 @@ export default function MermaidModal({ isOpen, onClose, diagram }: MermaidModalP
           containerRef.current.removeChild(containerRef.current.firstChild)
         }
 
-        const { svg } = await mermaid.render('mermaid-diagram', diagram)
+        // Generate unique ID for each render to avoid Mermaid caching issues
+        const uniqueId = `mermaid-diagram-${Date.now()}`
+        const { svg } = await mermaid.render(uniqueId, diagram)
 
         // Parse as HTML (not XML) since Mermaid SVG contains HTML labels like <br>
         const parser = new DOMParser()
