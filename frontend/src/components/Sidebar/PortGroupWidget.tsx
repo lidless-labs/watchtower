@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { fetchPortGroups } from '../../api/endpoints'
+import { apiClient } from '../../api/client'
 import type { PortGroupStats } from '../../demo/mockData'
 
 type WidgetState = 'loading' | 'no_data' | 'ready' | 'error'
@@ -206,8 +207,34 @@ export default function PortGroupWidget() {
     </div>
   )
 
-  function handleExport(groupName: string) {
-    window.open(`/api/port-groups/export/${encodeURIComponent(groupName)}`, '_blank')
+  async function handleExport(groupName: string) {
+    try {
+      const response = await apiClient.get(`/port-groups/export/${encodeURIComponent(groupName)}`, {
+        responseType: 'blob',
+      })
+
+      // Create download link
+      const url = window.URL.createObjectURL(new Blob([response.data]))
+      const link = document.createElement('a')
+      link.href = url
+
+      // Get filename from content-disposition header or generate one
+      const contentDisposition = response.headers['content-disposition']
+      let filename = `${groupName.toLowerCase().replace(/ /g, '_')}_traffic.csv`
+      if (contentDisposition) {
+        const match = contentDisposition.match(/filename="?([^";\n]+)"?/)
+        if (match) filename = match[1]
+      }
+
+      link.setAttribute('download', filename)
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+    } catch (err) {
+      console.error('Failed to export CSV:', err)
+      alert('Failed to export CSV. Please try again.')
+    }
   }
 }
 
