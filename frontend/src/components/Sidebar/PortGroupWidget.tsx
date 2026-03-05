@@ -209,28 +209,19 @@ export default function PortGroupWidget() {
 
   async function handleExport(groupName: string) {
     try {
+      // Fetch as text to use data URI (works on HTTP sites where blob downloads are blocked)
       const response = await apiClient.get(`/port-groups/export/${encodeURIComponent(groupName)}`, {
-        responseType: 'blob',
+        responseType: 'text',
       })
 
-      // Create download link
-      const url = window.URL.createObjectURL(new Blob([response.data]))
+      const filename = `${groupName.toLowerCase().replace(/ /g, '_')}_traffic.csv`
+      const dataUri = 'data:text/csv;charset=utf-8,' + encodeURIComponent(response.data)
       const link = document.createElement('a')
-      link.href = url
-
-      // Get filename from content-disposition header or generate one
-      const contentDisposition = response.headers['content-disposition']
-      let filename = `${groupName.toLowerCase().replace(/ /g, '_')}_traffic.csv`
-      if (contentDisposition) {
-        const match = contentDisposition.match(/filename="?([^";\n]+)"?/)
-        if (match) filename = match[1]
-      }
-
+      link.href = dataUri
       link.setAttribute('download', filename)
       document.body.appendChild(link)
       link.click()
       link.remove()
-      window.URL.revokeObjectURL(url)
     } catch (err) {
       console.error('Failed to export CSV:', err)
       alert('Failed to export CSV. Please try again.')

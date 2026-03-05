@@ -124,17 +124,15 @@ function generateMermaidDiagram(topology: Topology): string {
   return lines.join('\n')
 }
 
-// Trigger file download in browser
+// Trigger file download in browser using data URI (works on HTTP sites)
 function downloadFile(content: string, filename: string) {
-  const blob = new Blob([content], { type: 'text/plain' })
-  const url = URL.createObjectURL(blob)
+  const dataUri = 'data:text/plain;charset=utf-8,' + encodeURIComponent(content)
   const a = document.createElement('a')
-  a.href = url
+  a.href = dataUri
   a.download = filename
   document.body.appendChild(a)
   a.click()
   document.body.removeChild(a)
-  URL.revokeObjectURL(url)
 }
 
 const nodeTypes = {
