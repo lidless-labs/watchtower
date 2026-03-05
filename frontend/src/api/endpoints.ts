@@ -1,25 +1,18 @@
 /**
- * API endpoints - Demo mode
- * Returns bundled mock data instead of making network requests
+ * API endpoints - Real API calls
  */
 
-import {
-  mockTopology,
-  mockAlerts,
-  mockSpeedtest,
-  mockVMs,
-  mockL3Topology,
-  mockPortGroups,
-  mockProxmoxNodes,
-  type PortGroupStats,
-  type ProxmoxNodeDetail,
-} from '../demo/mockData'
+import { apiClient } from './client'
 import type { Topology, TopologySummary } from '../types/topology'
 import type { Device, DeviceSummary } from '../types/device'
 import type { AlertSummary, Alert } from '../types/alert'
 import type { L3Topology } from '../types/vlan'
+import type { PortGroupStats, ProxmoxNodeDetail } from '../demo/mockData'
 
-// Proxmox types (kept inline for compatibility)
+// Re-export types for backward compatibility
+export type { PortGroupStats, ProxmoxNodeDetail } from '../demo/mockData'
+
+// Proxmox VM types
 export interface ProxmoxVM {
   vmid: number
   name: string
@@ -51,85 +44,68 @@ export interface VMListResponse {
 
 // Topology
 export async function fetchTopology(): Promise<Topology> {
-  return mockTopology
+  const response = await apiClient.get<Topology>('/topology')
+  return response.data
 }
 
 export async function fetchTopologySummary(): Promise<TopologySummary> {
-  return {
-    total_devices: mockTopology.total_devices,
-    devices_up: mockTopology.devices_up,
-    devices_down: mockTopology.devices_down,
-    devices_degraded: 0,
-    active_alerts: mockTopology.active_alerts,
-    critical_alerts: mockAlerts.filter((a) => a.severity === 'critical').length,
-    warning_alerts: mockAlerts.filter((a) => a.severity === 'warning').length,
-  }
+  const response = await apiClient.get<TopologySummary>('/topology/summary')
+  return response.data
 }
 
 export async function fetchL3Topology(): Promise<L3Topology> {
-  return mockL3Topology
+  const response = await apiClient.get<L3Topology>('/topology/l3')
+  return response.data
 }
 
 // Devices
 export async function fetchDevices(): Promise<DeviceSummary[]> {
-  return Object.values(mockTopology.devices).map((d) => ({
-    id: d.id,
-    display_name: d.display_name,
-    device_type: d.device_type,
-    status: d.status,
-    alert_count: d.alert_count,
-  }))
+  const response = await apiClient.get<DeviceSummary[]>('/devices')
+  return response.data
 }
 
 export async function fetchDevice(deviceId: string): Promise<Device> {
-  const device = mockTopology.devices[deviceId]
-  if (!device) {
-    throw new Error(`Device not found: ${deviceId}`)
-  }
-  return device
+  const response = await apiClient.get<Device>(`/device/${deviceId}`)
+  return response.data
 }
 
 // Alerts
 export async function fetchAlerts(status?: string): Promise<AlertSummary[]> {
-  if (status) {
-    return mockAlerts.filter((a) => a.status === status)
-  }
-  return mockAlerts
+  const params = status ? { status } : {}
+  const response = await apiClient.get<AlertSummary[]>('/alerts', { params })
+  return response.data
 }
 
 export async function fetchAlert(alertId: string): Promise<Alert> {
-  const alert = mockAlerts.find((a) => a.id === alertId)
-  if (!alert) {
-    throw new Error(`Alert not found: ${alertId}`)
-  }
-  return {
-    ...alert,
-    details: 'Device has not responded to ICMP ping requests for over 5 minutes.',
-    downtime_seconds: 342,
-  }
+  const response = await apiClient.get<Alert>(`/alert/${alertId}`)
+  return response.data
 }
 
-export async function acknowledgeAlert(_alertId: string): Promise<void> {
-  // No-op in demo mode
+export async function acknowledgeAlert(alertId: string): Promise<void> {
+  await apiClient.post(`/alert/${alertId}/acknowledge`)
 }
 
-export async function resolveAlert(_alertId: string): Promise<void> {
-  // No-op in demo mode
+export async function resolveAlert(alertId: string): Promise<void> {
+  await apiClient.post(`/alert/${alertId}/resolve`)
 }
 
 // Proxmox VMs
 export async function fetchVMs(): Promise<VMListResponse> {
-  return mockVMs
+  const response = await apiClient.get<VMListResponse>('/vms')
+  return response.data
 }
 
-// Speedtest
-export async function fetchSpeedtest(): Promise<typeof mockSpeedtest> {
-  return mockSpeedtest
+// Speedtest - returns raw API data, component handles typing
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function fetchSpeedtest(): Promise<any> {
+  const response = await apiClient.get('/speedtest')
+  return response.data
 }
 
 // Port Groups
 export async function fetchPortGroups(): Promise<PortGroupStats[]> {
-  return mockPortGroups
+  const response = await apiClient.get<PortGroupStats[]>('/port-groups')
+  return response.data
 }
 
 // History API
@@ -148,50 +124,32 @@ export async function fetchDeviceHistory(
   deviceId: string,
   range: string = '24h'
 ): Promise<{ cpu: HistoryPoint[]; memory: HistoryPoint[]; temperature: HistoryPoint[]; interfaces: Record<string, HistoryPoint[]> }> {
-  const res = await fetch(`/api/history/device/${deviceId}/metrics?range=${range}`)
-  if (!res.ok) return { cpu: [], memory: [], temperature: [], interfaces: {} }
-  return res.json()
+  const response = await apiClient.get(`/history/device/${deviceId}/metrics`, { params: { range } })
+  return response.data
 }
 
 export async function fetchNetworkHistorySummary(range: string = '24h'): Promise<HistoryResponse> {
-  const res = await fetch(`/api/history/network/summary?range=${range}`)
-  if (!res.ok) return { points: [] }
-  return res.json()
+  const response = await apiClient.get('/history/network/summary', { params: { range } })
+  return response.data
 }
 
 export async function fetchAlertTimeline(range: string = '24h'): Promise<{ events: Array<{ time: string; device_id: string; hostname: string; severity: string; title: string; state: string }> }> {
-  const res = await fetch(`/api/history/alerts/timeline?range=${range}`)
-  if (!res.ok) return { events: [] }
-  return res.json()
+  const response = await apiClient.get('/history/alerts/timeline', { params: { range } })
+  return response.data
 }
 
 export async function fetchTopTalkers(range: string = '1h'): Promise<{ talkers: Array<{ device_id: string; interface_name: string; in_bps: number; out_bps: number; utilization: number }> }> {
-  const res = await fetch(`/api/history/network/top-talkers?range=${range}`)
-  if (!res.ok) return { talkers: [] }
-  return res.json()
+  const response = await apiClient.get('/history/network/top-talkers', { params: { range } })
+  return response.data
 }
 
 export async function fetchSpeedtestHistory(range: string = '7d'): Promise<HistoryResponse> {
-  const res = await fetch(`/api/history/speedtest?range=${range}`)
-  if (!res.ok) return { points: [] }
-  return res.json()
+  const response = await apiClient.get('/history/speedtest', { params: { range } })
+  return response.data
 }
 
 // Proxmox Node Detail
 export async function fetchProxmoxNode(nodeName: string): Promise<ProxmoxNodeDetail> {
-  const data = mockProxmoxNodes[nodeName]
-  if (!data) {
-    // Return empty data for unknown nodes
-    return {
-      node: null,
-      vms: [],
-      lxcs: [],
-      storage: [],
-      vms_running: 0,
-      vms_total: 0,
-      lxcs_running: 0,
-      lxcs_total: 0,
-    }
-  }
-  return data
+  const response = await apiClient.get<ProxmoxNodeDetail>(`/vms/node/${nodeName}`)
+  return response.data
 }

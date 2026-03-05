@@ -4,13 +4,13 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query
 
 from app.services.notification_service import notification_service
-from app.config import load_config
+from app.config import get_config
 
 router = APIRouter()
 
 
 def _get_config_dict() -> dict:
-    cfg = load_config()
+    cfg = get_config()
     return cfg.model_dump()
 
 
