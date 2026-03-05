@@ -1,160 +1,165 @@
-<p align="center">
-  <img src="https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=white" alt="React" />
-  <img src="https://img.shields.io/badge/TypeScript-5-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript" />
-  <img src="https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white" alt="FastAPI" />
-  <img src="https://img.shields.io/badge/Python-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python" />
-  <img src="https://img.shields.io/badge/Redis-DC382D?style=flat-square&logo=redis&logoColor=white" alt="Redis" />
-  <img src="https://img.shields.io/badge/InfluxDB-22ADF6?style=flat-square&logo=influxdb&logoColor=white" alt="InfluxDB" />
-  <img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="MIT License" />
-</p>
+# Watchtower
 
-# 🗼 Solomon's Watchtower
+**Real-time NOC dashboard for network monitoring.**
 
-**Real-time NOC dashboard for enterprise network monitoring.**
-
-Watchtower monitors network devices, interfaces, uptime, alerts, and topology through a production-grade Network Operations Center dashboard. Runs in two modes: production (real LibreNMS/Proxmox/InfluxDB backends) and demo (simulated data). WebSocket-driven live updates keep metrics current without page refreshes.
-
-![Watchtower](docs/screenshots/dashboard.png)
+A modern Network Operations Center dashboard that monitors network devices, interfaces, VMs, and alerts through LibreNMS, Proxmox, and other integrations. WebSocket-driven live updates keep metrics current without page refreshes.
 
 ---
 
 ## Features
 
-- **Real-Time Device Monitoring** - Status indicators with WebSocket-driven live updates
-- **Interactive Network Topology** - React Flow-based topology map with link status
-- **Alert Feed** - Severity levels, acknowledgment workflow, and configurable thresholds
-- **Interface Utilization** - Bandwidth, errors, and discard graphs via Recharts
-- **Uptime Tracking** - SLA percentage calculations per device
-- **Historical Data** - Time-series storage with InfluxDB (7-day demo data, or production)
-- **Topology Configuration** - YAML-based topology definitions
-- **Notification System** - Configurable alert escalation
-- **Dark Mode** - Optimized for NOC wall displays
-- **Demo Mode** - Simulated data for Vercel deployment and demos
-- **Update Script** - One-command production updates with `./scripts/update.sh`
+### Monitoring
+- **Device Status** — Real-time up/down/degraded status with WebSocket updates
+- **Network Topology** — Interactive React Flow map with link status and port details
+- **Interface Utilization** — Bandwidth, errors, and traffic graphs
+- **Port Groups** — Aggregate traffic monitoring for groups of ports by description
+- **Speedtest** — Scheduled WAN speed tests with historical tracking
 
----
+### Alerts & Notifications
+- **Alert Feed** — Critical/warning/info severity levels with acknowledgment workflow
+- **Multi-Channel Notifications** — Discord, Pushover, and Email alerts
+- **Configurable Thresholds** — Per-device CPU, memory, and interface limits
 
-## Quick Start
+### Infrastructure
+- **Proxmox Integration** — VM/LXC status, resource usage, and node details
+- **Historical Data** — InfluxDB time-series with configurable retention
+- **CDP/LLDP Discovery** — Automatic topology discovery from LibreNMS
 
-```bash
-git clone https://github.com/solomonneas/watchtower.git
-cd watchtower
-docker compose up --build
-```
-
-Frontend: **http://localhost:5173**
-Backend API: **http://localhost:8000**
+### Administration
+- **Settings UI** — Web-based configuration for integrations and thresholds
+- **JWT Authentication** — Secure API access with role-based permissions
+- **User Management** — Admin controls for access
 
 ---
 
 ## Tech Stack
 
-| Layer | Technology | Purpose |
-|-------|-----------|---------|
-| **Frontend** | React 18 | Dashboard UI |
-| **Language** | TypeScript 5 | Type safety |
-| **Styling** | Tailwind CSS 3 | Utility-first CSS |
-| **State** | Zustand | Global state management |
-| **Charts** | Recharts | Interface utilization graphs |
-| **Topology** | React Flow (XY Flow) | Interactive network topology |
-| **Diagrams** | Mermaid | Architecture diagrams |
-| **Bundler** | Vite 5 | Dev server with API/WS proxy |
-| **Backend** | FastAPI | REST API and WebSocket server |
-| **Cache** | Redis | Polling cache and session state |
-| **Time Series** | InfluxDB | Historical metrics (30d raw, 1y hourly, 5y daily) |
-| **Scheduler** | APScheduler | Background polling tasks |
-| **Auth** | JWT + bcrypt | API authentication |
+| Layer | Technology |
+|-------|------------|
+| Frontend | React 18, TypeScript, Tailwind CSS |
+| State | Zustand |
+| Visualization | React Flow, Recharts, Mermaid |
+| Backend | FastAPI, Python 3.12 |
+| Cache | Redis |
+| Time Series | InfluxDB |
+| Scheduler | APScheduler |
+| Auth | JWT + bcrypt |
 
 ---
 
-## Modes
+## Integrations
 
-| Mode | Data Source | Use Case |
-|------|-----------|----------|
-| **Production** | LibreNMS API, Proxmox API, InfluxDB | Enterprise monitoring |
-| **Demo** | Simulated data with realistic patterns | Demos, training, Vercel deployment |
+| Service | Purpose |
+|---------|---------|
+| **LibreNMS** | Device polling, SNMP data, alerts, CDP/LLDP topology |
+| **Proxmox** | VM/LXC monitoring, node health, storage |
+| **InfluxDB** | Historical metrics and graphs |
+| **Netdisco** | Network inventory (optional) |
 
 ---
 
-## Historical Data (InfluxDB)
+## Quick Start
 
-**Demo mode** works immediately with 7 days of seeded mock data.
+### Prerequisites
+- Python 3.12+
+- Node.js 20+
+- Redis
+- LibreNMS instance with API access
 
-**Production setup:**
+### Installation
+
 ```bash
-./scripts/setup-influxdb.sh
+git clone https://github.com/solomonneas/watchtower.git
+cd watchtower
+
+# Backend
+cd backend
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+
+# Frontend
+cd ../frontend
+npm install
+npm run build
 ```
 
-This starts the InfluxDB container, creates retention buckets (30d raw, 1y hourly, 5y daily), and sets up downsampling tasks. Add the config to `config/config.yaml`:
+### Configuration
+
+Copy and edit the config files:
+
+```bash
+cp config/config.example.yaml config/config.yaml
+cp config/topology.example.yaml config/topology.yaml
+```
+
+Edit `config/config.yaml` with your credentials:
 
 ```yaml
-influxdb:
-  url: "http://localhost:8086"
-  token: "your-token"
-  org: "watchtower"
-  bucket: "watchtower"
-  enabled: true
+auth:
+  admin_user: admin
+  admin_password_hash: ""  # Set on first login
+  jwt_secret: "change-this-to-random-string"
+
+data_sources:
+  librenms:
+    url: "http://your-librenms-server"
+    api_key: "your-api-key"
+
+  proxmox:
+    url: "https://your-proxmox-server:8006"
+    token_id: "user@pve!tokenname"
+    token_secret: "your-token-secret"
+    verify_ssl: false
 ```
 
----
-
-## Updating Production
+### Running
 
 ```bash
-./scripts/update.sh
+# Development
+cd backend && uvicorn app.main:app --reload
+cd frontend && npm run dev
+
+# Production (systemd)
+sudo systemctl start watchtower
 ```
-
-Options: `--no-pull`, `--backend`, `--frontend`
-
-Handles git pull, pip install, npm build, InfluxDB container check, and service restart (systemd, PM2, or bare uvicorn).
 
 ---
 
 ## Project Structure
 
-```text
+```
 watchtower/
 ├── frontend/
-│   ├── src/
-│   │   ├── api/               # Backend API client
-│   │   ├── components/        # UI components
-│   │   ├── demo/              # Demo data generators
-│   │   ├── hooks/             # Custom React hooks
-│   │   ├── pages/             # Page views
-│   │   ├── store/             # Zustand state
-│   │   ├── styles/            # CSS modules
-│   │   └── types/             # TypeScript interfaces
-│   ├── vite.config.ts
-│   └── package.json
+│   └── src/
+│       ├── api/           # API client
+│       ├── components/    # React components
+│       ├── pages/         # Page views
+│       ├── store/         # Zustand state
+│       └── types/         # TypeScript types
 ├── backend/
-│   ├── app/
-│   │   ├── main.py            # FastAPI entry point
-│   │   ├── websocket.py       # WebSocket handler
-│   │   ├── routers/           # API routes
-│   │   ├── services/          # LibreNMS, Proxmox integrations
-│   │   ├── models/            # Pydantic models
-│   │   ├── polling/           # Background polling tasks
-│   │   ├── discovery/         # Device discovery
-│   │   ├── history/           # InfluxDB time-series
-│   │   ├── notifications/     # Alert notifications
-│   │   ├── cache.py           # Redis cache layer
-│   │   ├── auth.py            # JWT authentication
-│   │   └── config.py          # Configuration loader
-│   └── requirements.txt
+│   └── app/
+│       ├── routers/       # API endpoints
+│       ├── polling/       # Background jobs
+│       ├── history/       # InfluxDB integration
+│       ├── services/      # Notification service
+│       └── models/        # Pydantic models
 ├── config/
-│   ├── config.example.yaml    # Main configuration
-│   ├── topology.example.yaml  # Network topology definition
-│   └── topology.demo.yaml     # Demo topology
-├── scripts/
-│   ├── update.sh              # Production update script
-│   └── setup-influxdb.sh      # InfluxDB setup
-├── install/
-│   ├── install.sh             # Production install
-│   ├── dev.sh                 # Dev environment setup
-│   └── create-lxc.sh          # Proxmox LXC creation
-├── docker-compose.yml
-└── specs/                     # Feature specifications
+│   ├── config.yaml        # Main configuration
+│   └── topology.yaml      # Network topology
+└── scripts/
+    └── update.sh          # Production updates
 ```
+
+---
+
+## Updating
+
+```bash
+./scripts/update.sh
+```
+
+Pulls latest code, installs dependencies, rebuilds frontend, and restarts the service.
 
 ---
 
