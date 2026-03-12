@@ -1,7 +1,10 @@
 """Authentication API routes."""
 
 import logging
+import os
 import time
+from collections import defaultdict
+from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
@@ -15,23 +18,24 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-# ── In-memory rate limiter ───────────────────────────────────────────────────
 # Max 5 login attempts per IP per 5 minutes.
 _LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 _RATE_LIMIT_MAX = 5
-_RATE_LIMIT_WINDOW = 300  # seconds
+_RATE_LIMIT_WINDOW = 300
+
+_BOOTSTRAP_ATTEMPTS: dict[str, list[float]] = defaultdict(list)
+_BOOTSTRAP_RATE_LIMIT_MAX = 3
+_BOOTSTRAP_RATE_LIMIT_WINDOW = 60
 
 
 def _check_rate_limit(ip: str) -> None:
     """Raise 429 if IP exceeds login attempt threshold."""
     now = time.monotonic()
-    # Clean up expired entries opportunistically
     expired_ips = [k for k, v in _LOGIN_ATTEMPTS.items() if v and v[-1] < now - _RATE_LIMIT_WINDOW]
     for k in expired_ips:
         del _LOGIN_ATTEMPTS[k]
 
     attempts = _LOGIN_ATTEMPTS.get(ip, [])
-    # Keep only attempts within the window
     attempts = [t for t in attempts if t > now - _RATE_LIMIT_WINDOW]
     _LOGIN_ATTEMPTS[ip] = attempts
 
@@ -40,6 +44,24 @@ def _check_rate_limit(ip: str) -> None:
 
     attempts.append(now)
     _LOGIN_ATTEMPTS[ip] = attempts
+
+
+def _check_bootstrap_rate_limit(ip: str) -> None:
+    """Raise 429 if bootstrap attempts exceed the per-minute cap."""
+    now = time.monotonic()
+
+    expired_ips = [k for k, v in _BOOTSTRAP_ATTEMPTS.items() if v and v[-1] < now - _BOOTSTRAP_RATE_LIMIT_WINDOW]
+    for k in expired_ips:
+        del _BOOTSTRAP_ATTEMPTS[k]
+
+    attempts = [t for t in _BOOTSTRAP_ATTEMPTS.get(ip, []) if t > now - _BOOTSTRAP_RATE_LIMIT_WINDOW]
+    if len(attempts) >= _BOOTSTRAP_RATE_LIMIT_MAX:
+        _BOOTSTRAP_ATTEMPTS[ip] = attempts
+        _log_bootstrap_attempt(ip, False, "rate limited")
+        raise HTTPException(status_code=429, detail="Too many bootstrap attempts. Try again later.")
+
+    attempts.append(now)
+    _BOOTSTRAP_ATTEMPTS[ip] = attempts
 
 
 class LoginRequest(BaseModel):
@@ -77,10 +99,56 @@ def _persist_admin_password_hash(password_hash: str) -> None:
     config.auth.admin_password_hash = password_hash
 
 
+def _client_ip(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
+
+
+def _is_localhost(ip: str) -> bool:
+    return ip in {"127.0.0.1", "::1", "localhost"}
+
+
+def _extract_bootstrap_token(request: Request) -> str:
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.lower().startswith("bearer "):
+        return auth_header.split(" ", 1)[1].strip()
+
+    return (
+        request.headers.get("X-Watchtower-Bootstrap-Token", "").strip()
+        or request.query_params.get("bootstrap_token", "").strip()
+    )
+
+
+def _log_bootstrap_attempt(ip: str, allowed: bool, reason: str) -> None:
+    logger.warning(
+        "Bootstrap login attempt from %s at %s allowed=%s reason=%s",
+        ip,
+        datetime.now(timezone.utc).isoformat(),
+        allowed,
+        reason,
+    )
+
+
+def _authorize_bootstrap(request: Request, client_ip: str) -> None:
+    bootstrap_env_token = os.getenv("WATCHTOWER_BOOTSTRAP_TOKEN", "").strip()
+    provided_token = _extract_bootstrap_token(request)
+
+    if _is_localhost(client_ip):
+        _log_bootstrap_attempt(client_ip, True, "localhost")
+        return
+
+    if bootstrap_env_token and provided_token == bootstrap_env_token:
+        _log_bootstrap_attempt(client_ip, True, "valid bootstrap token")
+        return
+
+    reason = "missing bootstrap token" if bootstrap_env_token else "non-local bootstrap denied"
+    _log_bootstrap_attempt(client_ip, False, reason)
+    raise HTTPException(status_code=403, detail="First-login bootstrap is restricted")
+
+
 @router.post("/login")
 async def login(payload: LoginRequest, request: Request):
     """Authenticate an admin user and return JWT token."""
-    client_ip = request.client.host if request.client else "unknown"
+    client_ip = _client_ip(request)
     _check_rate_limit(client_ip)
 
     if payload.username != config.auth.admin_user:
@@ -89,19 +157,15 @@ async def login(payload: LoginRequest, request: Request):
     initial_setup = False
 
     if not config.auth.admin_password_hash:
-        # ── Initial setup (bootstrap) ────────────────────────────────────
-        # This is intentional: the first person to access a fresh install
-        # IS the admin (self-hosted tool). We require a minimum password
-        # length and log a warning so it's auditable.
+        _check_bootstrap_rate_limit(client_ip)
+        _authorize_bootstrap(request, client_ip)
+
         if len(payload.password) < 8:
             raise HTTPException(
                 status_code=400,
                 detail="Password must be at least 8 characters for initial setup.",
             )
-        logger.warning(
-            "Initial admin password set via first-login bootstrap from %s",
-            client_ip,
-        )
+        logger.warning("Initial admin password set via first-login bootstrap from %s", client_ip)
         password_hash = hash_password(payload.password)
         _persist_admin_password_hash(password_hash)
         initial_setup = True
