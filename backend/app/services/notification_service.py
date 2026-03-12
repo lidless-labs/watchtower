@@ -295,7 +295,7 @@ class NotificationService:
             hostname=cfg["smtp_host"],
             port=cfg.get("smtp_port", 587),
             username=cfg.get("smtp_user") or None,
-            password=cfg.get("smtp_pass") or None,
+            password=cfg.get("smtp_password") or None,
             start_tls=cfg.get("use_tls", True),
         )
 

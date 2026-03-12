@@ -97,7 +97,7 @@ class EmailConfig(BaseModel):
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_user: str = ""
-    smtp_pass: str = ""
+    smtp_password: str = ""
     use_tls: bool = True
     from_address: str = ""
     recipients: list[str] = []
@@ -248,8 +248,13 @@ def load_yaml_config(path: str) -> dict[str, Any]:
 
 def get_config() -> AppConfig:
     """Load and return the application configuration."""
-    settings = Settings()
-    yaml_config = load_yaml_config(settings.config_path)
+    runtime_settings = Settings()
+    yaml_config = load_yaml_config(runtime_settings.config_path)
+
+    email_cfg = yaml_config.get("notifications", {}).get("channels", {}).get("email")
+    if isinstance(email_cfg, dict) and "smtp_pass" in email_cfg and "smtp_password" not in email_cfg:
+        email_cfg["smtp_password"] = email_cfg.pop("smtp_pass")
+
     return AppConfig(**yaml_config)
 
 
