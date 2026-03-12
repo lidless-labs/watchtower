@@ -19,8 +19,17 @@ export interface SettingsData {
     channels?: {
       discord?: { enabled?: boolean; webhook_url?: string; mention_role?: string }
       pushover?: { enabled?: boolean; user_key?: string; app_token?: string; priority?: number }
-      email?: { enabled?: boolean; smtp_host?: string; smtp_port?: number; smtp_user?: string; smtp_pass?: string; use_tls?: boolean; from_address?: string; recipients?: string[]; subject_prefix?: string }
-      twilio?: { enabled?: boolean; account_sid?: string; auth_token?: string; from_number?: string; recipients?: string[] }
+      email?: {
+        enabled?: boolean
+        smtp_host?: string
+        smtp_port?: number
+        smtp_user?: string
+        smtp_password?: string
+        use_tls?: boolean
+        from_address?: string
+        recipients?: string[]
+        subject_prefix?: string
+      }
     }
   }
   alert_thresholds?: {
