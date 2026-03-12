@@ -97,7 +97,7 @@ class EmailConfig(BaseModel):
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_user: str = ""
-    smtp_pass: str = ""
+    smtp_password: str = ""
     use_tls: bool = True
     from_address: str = ""
     recipients: list[str] = []
@@ -217,7 +217,7 @@ class Settings(BaseSettings):
     """Environment-based settings."""
 
     redis_url: str = "redis://localhost:6379"
-    dev_mode: bool = True
+    dev_mode: bool = False
     demo_mode: bool = False  # Run with fake data, no real APIs needed
     config_path: str = "../config/config.yaml"
     topology_path: str = "../config/topology.yaml"
@@ -246,10 +246,19 @@ def load_yaml_config(path: str) -> dict[str, Any]:
         return yaml.safe_load(f) or {}
 
 
+def normalize_legacy_smtp_keys(config_dict: dict[str, Any]) -> dict[str, Any]:
+    """Normalize legacy SMTP key names in notification email config."""
+    email_cfg = config_dict.get("notifications", {}).get("channels", {}).get("email")
+    if isinstance(email_cfg, dict) and "smtp_pass" in email_cfg and "smtp_password" not in email_cfg:
+        email_cfg["smtp_password"] = email_cfg.pop("smtp_pass")
+    return config_dict
+
+
+
 def get_config() -> AppConfig:
     """Load and return the application configuration."""
-    settings = Settings()
-    yaml_config = load_yaml_config(settings.config_path)
+    runtime_settings = Settings()
+    yaml_config = normalize_legacy_smtp_keys(load_yaml_config(runtime_settings.config_path))
     return AppConfig(**yaml_config)
 
 
@@ -370,12 +379,12 @@ def get_config_dict() -> dict:
     config_path = _config_file_path()
     if not config_path.exists():
         return {}
-    return load_yaml_config(str(config_path))
+    return normalize_legacy_smtp_keys(load_yaml_config(str(config_path)))
 
 
 def mask_secrets(config_dict: dict) -> dict:
     """Deep-copy config and mask sensitive fields."""
-    sensitive_markers = ("password", "secret", "token", "api_key")
+    sensitive_markers = ("password", "secret", "token", "api_key", "smtp_pass")
 
     def _mask_value(key: str, value: Any) -> Any:
         if not isinstance(value, str) or value == "":
@@ -442,8 +451,8 @@ def persist_config(updates: dict) -> None:
     global config
 
     config_path = _config_file_path()
-    existing = load_yaml_config(str(config_path)) if config_path.exists() else {}
-    merged = merge_config(existing, updates)
+    existing = normalize_legacy_smtp_keys(load_yaml_config(str(config_path))) if config_path.exists() else {}
+    merged = normalize_legacy_smtp_keys(merge_config(existing, updates))
 
     # Validate BEFORE writing to disk
     validated = AppConfig(**merged)

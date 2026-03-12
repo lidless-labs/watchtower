@@ -7,6 +7,9 @@ import json
 from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
+from starlette.websockets import WebSocketState
+
+from .auth import decode_token
 
 
 class ConnectionManager:
@@ -17,7 +20,7 @@ class ConnectionManager:
         self._lock = asyncio.Lock()
 
     async def connect(self, websocket: WebSocket) -> None:
-        """Accept a new WebSocket connection."""
+        """Accept a new authenticated WebSocket connection."""
         await websocket.accept()
         async with self._lock:
             self.active_connections.append(websocket)
@@ -48,7 +51,6 @@ class ConnectionManager:
                 except Exception:
                     disconnected.append(connection)
 
-        # Clean up disconnected clients
         for conn in disconnected:
             await self.disconnect(conn)
 
@@ -58,27 +60,75 @@ class ConnectionManager:
         return len(self.active_connections)
 
 
-# Singleton instance
 ws_manager = ConnectionManager()
+
+
+async def _close_unauthorized(websocket: WebSocket) -> None:
+    if websocket.application_state == WebSocketState.CONNECTING:
+        await websocket.accept()
+    await websocket.close(code=4001)
+
+
+async def _authenticate_websocket(websocket: WebSocket) -> dict[str, Any] | None:
+    token = (websocket.query_params.get("token") or "").strip()
+
+    if token:
+        try:
+            return decode_token(token)
+        except Exception:
+            return None
+
+    if websocket.application_state == WebSocketState.CONNECTING:
+        await websocket.accept()
+
+    try:
+        raw_message = await websocket.receive_text()
+    except WebSocketDisconnect:
+        return None
+
+    try:
+        message = json.loads(raw_message)
+    except json.JSONDecodeError:
+        return None
+
+    candidate = str(message.get("token") or "").strip()
+    if not candidate:
+        return None
+
+    try:
+        return decode_token(candidate)
+    except Exception:
+        return None
 
 
 async def websocket_endpoint(websocket: WebSocket) -> None:
     """WebSocket endpoint handler."""
-    await ws_manager.connect(websocket)
+    user = await _authenticate_websocket(websocket)
+    if not user:
+        await _close_unauthorized(websocket)
+        return
 
-    # Send initial connection confirmation
+    if websocket.application_state != WebSocketState.CONNECTED:
+        await ws_manager.connect(websocket)
+    else:
+        async with ws_manager._lock:
+            if websocket not in ws_manager.active_connections:
+                ws_manager.active_connections.append(websocket)
+
     await ws_manager.send_personal(
-        {"type": "connected", "message": "Connected to Watchtower"},
+        {
+            "type": "connected",
+            "message": "Connected to Watchtower",
+            "user": user,
+        },
         websocket,
     )
 
     try:
         while True:
-            # Keep connection alive, handle incoming messages
             data = await websocket.receive_text()
             try:
                 message = json.loads(data)
-                # Handle ping/pong for keepalive
                 if message.get("type") == "ping":
                     await ws_manager.send_personal({"type": "pong"}, websocket)
             except json.JSONDecodeError:

@@ -10,6 +10,7 @@ from .cache import redis_cache
 from .config import config, settings, get_config
 from .polling import scheduler
 from .routers import alerts_router, devices_router, topology_router, history_router, settings_router
+from .routers.alerts import shutdown_notification_worker
 from .routers.auth_router import router as auth_router
 from .routers.diagnostics import router as diagnostics_router
 from .routers.discovery import router as discovery_router
@@ -85,6 +86,7 @@ async def lifespan(app: FastAPI):
     if not settings.demo_mode and settings.influxdb_enabled:
         from .history.client import influx_client
         await influx_client.disconnect()
+    await shutdown_notification_worker()
     await scheduler.stop()
     await redis_cache.disconnect()
 
@@ -97,7 +99,11 @@ app = FastAPI(
 )
 
 # CORS configuration
-origins = ["*"] if settings.dev_mode else []
+origins = [
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:5173",
+] if settings.dev_mode else []
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,

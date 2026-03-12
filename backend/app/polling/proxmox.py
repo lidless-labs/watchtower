@@ -7,11 +7,19 @@ API docs: https://pve.proxmox.com/pve-docs/api-viewer/
 
 from __future__ import annotations
 
-import httpx
+import asyncio
+import logging
 from typing import Any
+
+import httpx
 from pydantic import BaseModel
 
 from app.config import get_settings
+
+logger = logging.getLogger("watchtower.proxmox")
+_PROXMOX_NODE_FETCH_TIMEOUT = 30.0
+_PROXMOX_VM_BATCH_TIMEOUT = 120.0
+_PROXMOX_NODE_FETCH_CONCURRENCY = 5
 
 
 class ProxmoxNode(BaseModel):
@@ -148,34 +156,80 @@ class ProxmoxClient:
             running_only: If True, only return running VMs/containers
         """
         nodes = await self.get_nodes()
+        online_nodes = [node for node in nodes if node.status == "online"]
+        semaphore = asyncio.Semaphore(_PROXMOX_NODE_FETCH_CONCURRENCY)
+
+        async def _fetch_node_instances(node_name: str, instance_type: str) -> list[ProxmoxVM]:
+            endpoint = f"/nodes/{node_name}/{instance_type}"
+            try:
+                async with semaphore:
+                    data = await asyncio.wait_for(self._get(endpoint), timeout=_PROXMOX_NODE_FETCH_TIMEOUT)
+            except asyncio.TimeoutError:
+                logger.warning("Timed out fetching %s data for Proxmox node %s", instance_type, node_name)
+                return []
+            except httpx.HTTPStatusError as exc:
+                logger.warning(
+                    "Failed to fetch %s data for Proxmox node %s: %s",
+                    instance_type,
+                    node_name,
+                    exc,
+                )
+                return []
+            except Exception as exc:
+                logger.warning(
+                    "Unexpected error fetching %s data for Proxmox node %s: %s",
+                    instance_type,
+                    node_name,
+                    exc,
+                )
+                return []
+
+            items: list[ProxmoxVM] = []
+            for raw in data.get("data", []):
+                raw["node"] = node_name
+                raw["type"] = instance_type
+
+                if running_only and raw.get("status") != "running":
+                    continue
+
+                try:
+                    items.append(ProxmoxVM(**raw))
+                except Exception as exc:
+                    logger.warning(
+                        "Skipping invalid Proxmox VM record for node=%s type=%s: %s raw=%s",
+                        node_name,
+                        instance_type,
+                        exc,
+                        raw,
+                    )
+            return items
+
+        tasks = [
+            asyncio.create_task(_fetch_node_instances(node.node, instance_type))
+            for node in online_nodes
+            for instance_type in ("qemu", "lxc")
+        ]
+
+        try:
+            results = await asyncio.wait_for(
+                asyncio.gather(*tasks, return_exceptions=True),
+                timeout=_PROXMOX_VM_BATCH_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("Timed out fetching Proxmox VM inventory after %ss", _PROXMOX_VM_BATCH_TIMEOUT)
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            return []
+
         all_vms: list[ProxmoxVM] = []
-
-        for node in nodes:
-            if node.status != "online":
+        for result in results:
+            if isinstance(result, Exception):
+                logger.warning("Ignoring Proxmox node fetch failure: %s", result)
                 continue
-
-            # Get QEMU VMs
-            try:
-                qemu_data = await self._get(f"/nodes/{node.node}/qemu")
-                for vm in qemu_data.get("data", []):
-                    vm["node"] = node.node
-                    vm["type"] = "qemu"
-                    all_vms.append(ProxmoxVM(**vm))
-            except httpx.HTTPStatusError:
-                pass
-
-            # Get LXC containers
-            try:
-                lxc_data = await self._get(f"/nodes/{node.node}/lxc")
-                for ct in lxc_data.get("data", []):
-                    ct["node"] = node.node
-                    ct["type"] = "lxc"
-                    all_vms.append(ProxmoxVM(**ct))
-            except httpx.HTTPStatusError:
-                pass
-
-        if running_only:
-            all_vms = [vm for vm in all_vms if vm.status == "running"]
+            all_vms.extend(result)
 
         return all_vms
 

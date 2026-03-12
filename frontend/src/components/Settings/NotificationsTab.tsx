@@ -53,7 +53,7 @@ export default function NotificationsTab() {
   const [general, setGeneral] = useState({ notify_on: ['critical'], notify_on_recovery: true, cooldown_minutes: 5 })
   const [discord, setDiscord] = useState({ enabled: false, webhook_url: '', mention_role: '@here' })
   const [pushover, setPushover] = useState({ enabled: false, user_key: '', app_token: '', priority: 2 })
-  const [email, setEmail] = useState({ enabled: false, smtp_host: '', smtp_port: 587, smtp_user: '', smtp_pass: '', use_tls: true, from_address: '', recipients: [] as string[], subject_prefix: '[Watchtower]' })
+  const [email, setEmail] = useState({ enabled: false, smtp_host: '', smtp_port: 587, smtp_user: '', smtp_password: '', use_tls: true, from_address: '', recipients: [] as string[], subject_prefix: '[Watchtower]' })
   const [testing, setTesting] = useState<string | null>(null)
   const [testResult, setTestResult] = useState<{ channel: string; ok: boolean; msg: string } | null>(null)
 
@@ -65,7 +65,7 @@ export default function NotificationsTab() {
       if (n.channels?.pushover) setPushover({ enabled: n.channels.pushover.enabled ?? false, user_key: n.channels.pushover.user_key ?? '', app_token: n.channels.pushover.app_token ?? '', priority: n.channels.pushover.priority ?? 2 })
       if (n.channels?.email) {
         const e = n.channels.email
-        setEmail({ enabled: e.enabled ?? false, smtp_host: e.smtp_host ?? '', smtp_port: e.smtp_port ?? 587, smtp_user: e.smtp_user ?? '', smtp_pass: e.smtp_pass ?? '', use_tls: e.use_tls ?? true, from_address: e.from_address ?? '', recipients: e.recipients ?? [], subject_prefix: e.subject_prefix ?? '[Watchtower]' })
+        setEmail({ enabled: e.enabled ?? false, smtp_host: e.smtp_host ?? '', smtp_port: e.smtp_port ?? 587, smtp_user: e.smtp_user ?? '', smtp_password: e.smtp_password ?? '', use_tls: e.use_tls ?? true, from_address: e.from_address ?? '', recipients: e.recipients ?? [], subject_prefix: e.subject_prefix ?? '[Watchtower]' })
       }
     }
   }, [settings])
@@ -83,7 +83,11 @@ export default function NotificationsTab() {
     setTesting(channel)
     setTestResult(null)
     try {
-      const res = await fetch(`${API}/api/notifications/test/${channel}`, { method: 'POST' })
+      const token = localStorage.getItem('watchtower_token')
+      const res = await fetch(`${API}/api/notifications/test/${channel}`, {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
       const data = await res.json()
       setTestResult({ channel, ok: data.status === 'success' || data.status === 'demo', msg: data.status === 'success' ? 'Test sent!' : data.error || data.status })
     } catch (err) {
@@ -181,7 +185,7 @@ export default function NotificationsTab() {
           </div>
           <div>
             <label className="block text-sm text-text-secondary mb-1">Password</label>
-            <SecretInput value={email.smtp_pass} onChange={(v) => { setEmail((p) => ({ ...p, smtp_pass: v })); dirty() }} />
+            <SecretInput value={email.smtp_password} onChange={(v) => { setEmail((p) => ({ ...p, smtp_password: v })); dirty() }} />
           </div>
           <div>
             <label className="block text-sm text-text-secondary mb-1">From Address</label>
