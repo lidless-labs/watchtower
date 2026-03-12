@@ -25,66 +25,67 @@ _previously_seen_alerts: set[str] = set()
 
 _NOTIFICATION_QUEUE_MAXSIZE = 1000
 _NOTIFICATION_WORKER_CONCURRENCY = 5
+_NOTIFICATION_DRAIN_TIMEOUT = 10.0
 _notification_queue: asyncio.Queue[Callable[[], Awaitable[None]]] = asyncio.Queue(maxsize=_NOTIFICATION_QUEUE_MAXSIZE)
-_notification_worker_task: asyncio.Task[None] | None = None
+_notification_worker_tasks: list[asyncio.Task[None]] = []
 _notification_worker_lock = asyncio.Lock()
 
 
-async def _notification_worker() -> None:
+async def _notification_worker(semaphore: asyncio.Semaphore) -> None:
     """Process queued notification jobs with bounded concurrency."""
-    semaphore = asyncio.Semaphore(_NOTIFICATION_WORKER_CONCURRENCY)
-    in_flight: set[asyncio.Task[None]] = set()
-
-    async def _run_job(job_factory: Callable[[], Awaitable[None]]) -> None:
-        async with semaphore:
-            try:
-                await job_factory()
-            except Exception:
-                logger.exception("Failed to dispatch queued alert notification")
-            finally:
-                _notification_queue.task_done()
-
     try:
         while True:
-            job_factory = await _notification_queue.get()
-            task = asyncio.create_task(_run_job(job_factory))
-            in_flight.add(task)
-            task.add_done_callback(in_flight.discard)
+            async with semaphore:
+                job_factory = await _notification_queue.get()
+                try:
+                    await job_factory()
+                except Exception:
+                    logger.exception("Failed to dispatch queued alert notification")
+                finally:
+                    _notification_queue.task_done()
     except asyncio.CancelledError:
-        for task in list(in_flight):
-            task.cancel()
-        if in_flight:
-            await asyncio.gather(*in_flight, return_exceptions=True)
         raise
 
 
 async def ensure_notification_worker() -> None:
     """Start the queue worker once for the process lifetime."""
-    global _notification_worker_task
+    global _notification_worker_tasks
 
-    if _notification_worker_task and not _notification_worker_task.done():
+    if _notification_worker_tasks and any(not task.done() for task in _notification_worker_tasks):
         return
 
     async with _notification_worker_lock:
-        if _notification_worker_task and not _notification_worker_task.done():
+        if _notification_worker_tasks and any(not task.done() for task in _notification_worker_tasks):
             return
-        _notification_worker_task = asyncio.create_task(_notification_worker())
+        semaphore = asyncio.Semaphore(_NOTIFICATION_WORKER_CONCURRENCY)
+        _notification_worker_tasks = [
+            asyncio.create_task(_notification_worker(semaphore))
+            for _ in range(_NOTIFICATION_WORKER_CONCURRENCY)
+        ]
 
 
 async def shutdown_notification_worker() -> None:
     """Stop the queue worker cleanly during app shutdown."""
-    global _notification_worker_task
+    global _notification_worker_tasks
 
-    if not _notification_worker_task:
+    if not _notification_worker_tasks:
         return
 
-    _notification_worker_task.cancel()
     try:
-        await _notification_worker_task
-    except asyncio.CancelledError:
-        pass
+        await asyncio.wait_for(_notification_queue.join(), timeout=_NOTIFICATION_DRAIN_TIMEOUT)
+    except asyncio.TimeoutError:
+        logger.warning(
+            "Timed out waiting %.1fs for notification queue to drain before shutdown",
+            _NOTIFICATION_DRAIN_TIMEOUT,
+        )
+
+    for task in _notification_worker_tasks:
+        task.cancel()
+
+    try:
+        await asyncio.gather(*_notification_worker_tasks, return_exceptions=True)
     finally:
-        _notification_worker_task = None
+        _notification_worker_tasks = []
 
 
 def _enqueue_notification(job_factory: Callable[[], Awaitable[None]]) -> None:

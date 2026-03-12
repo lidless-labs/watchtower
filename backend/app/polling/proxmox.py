@@ -18,6 +18,7 @@ from app.config import get_settings
 
 logger = logging.getLogger("watchtower.proxmox")
 _PROXMOX_NODE_FETCH_TIMEOUT = 30.0
+_PROXMOX_VM_BATCH_TIMEOUT = 120.0
 _PROXMOX_NODE_FETCH_CONCURRENCY = 5
 
 
@@ -187,15 +188,41 @@ class ProxmoxClient:
             for raw in data.get("data", []):
                 raw["node"] = node_name
                 raw["type"] = instance_type
-                items.append(ProxmoxVM(**raw))
+
+                if running_only and raw.get("status") != "running":
+                    continue
+
+                try:
+                    items.append(ProxmoxVM(**raw))
+                except Exception as exc:
+                    logger.warning(
+                        "Skipping invalid Proxmox VM record for node=%s type=%s: %s raw=%s",
+                        node_name,
+                        instance_type,
+                        exc,
+                        raw,
+                    )
             return items
 
         tasks = [
-            _fetch_node_instances(node.node, instance_type)
+            asyncio.create_task(_fetch_node_instances(node.node, instance_type))
             for node in online_nodes
             for instance_type in ("qemu", "lxc")
         ]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        try:
+            results = await asyncio.wait_for(
+                asyncio.gather(*tasks, return_exceptions=True),
+                timeout=_PROXMOX_VM_BATCH_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("Timed out fetching Proxmox VM inventory after %ss", _PROXMOX_VM_BATCH_TIMEOUT)
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            return []
 
         all_vms: list[ProxmoxVM] = []
         for result in results:
@@ -203,9 +230,6 @@ class ProxmoxClient:
                 logger.warning("Ignoring Proxmox node fetch failure: %s", result)
                 continue
             all_vms.extend(result)
-
-        if running_only:
-            all_vms = [vm for vm in all_vms if vm.status == "running"]
 
         return all_vms
 
