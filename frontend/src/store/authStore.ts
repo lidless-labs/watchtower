@@ -16,6 +16,10 @@ interface LoginResponse {
   initial_setup?: boolean
 }
 
+interface JwtPayload {
+  exp?: number
+}
+
 interface AuthState {
   token: string | null
   user: AuthUser | null
@@ -25,6 +29,30 @@ interface AuthState {
   logout: () => void
   checkAuth: () => boolean
   clearInitialSetupFlag: () => void
+}
+
+function decodeJwtPayload(token: string): JwtPayload | null {
+  try {
+    const [, payload] = token.split('.')
+    if (!payload) {
+      return null
+    }
+
+    const normalized = payload.replace(/-/g, '+').replace(/_/g, '/')
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=')
+    return JSON.parse(window.atob(padded)) as JwtPayload
+  } catch {
+    return null
+  }
+}
+
+function isTokenExpired(token: string): boolean {
+  const payload = decodeJwtPayload(token)
+  if (!payload?.exp) {
+    return true
+  }
+
+  return payload.exp * 1000 <= Date.now()
 }
 
 export const useAuthStore = create<AuthState>()(
@@ -64,15 +92,17 @@ export const useAuthStore = create<AuthState>()(
 
       checkAuth: () => {
         const token = get().token ?? localStorage.getItem('watchtower_token')
-        const isAuthenticated = Boolean(token)
 
-        if (!isAuthenticated) {
-          set({ token: null, user: null, isAuthenticated: false })
+        if (!token || isTokenExpired(token)) {
+          localStorage.removeItem('watchtower_token')
+          set({ token: null, user: null, isAuthenticated: false, initialSetupComplete: false })
           return false
         }
 
         if (!get().token) {
           set({ token, isAuthenticated: true })
+        } else {
+          set({ isAuthenticated: true })
         }
 
         return true

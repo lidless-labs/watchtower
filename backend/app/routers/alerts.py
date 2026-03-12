@@ -2,11 +2,12 @@
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from fastapi import APIRouter, HTTPException
 
 from ..cache import redis_cache
-from ..config import settings, get_config
+from ..config import get_config, settings
 from ..polling.aggregator import get_aggregated_topology
 from ..polling.scheduler import CACHE_ALERTS
 from ..models.alert import Alert, AlertStatus, AlertSeverity, AlertSummary
@@ -22,9 +23,89 @@ _acknowledged_alerts: set[str] = set()
 # Track previously seen alert IDs for notification dispatch
 _previously_seen_alerts: set[str] = set()
 
+_NOTIFICATION_QUEUE_MAXSIZE = 1000
+_NOTIFICATION_WORKER_CONCURRENCY = 5
+_NOTIFICATION_DRAIN_TIMEOUT = 10.0
+_notification_queue: asyncio.Queue[Callable[[], Awaitable[None]]] = asyncio.Queue(maxsize=_NOTIFICATION_QUEUE_MAXSIZE)
+_notification_worker_tasks: list[asyncio.Task[None]] = []
+_notification_worker_lock = asyncio.Lock()
+
+
+async def _notification_worker(semaphore: asyncio.Semaphore) -> None:
+    """Process queued notification jobs with bounded concurrency."""
+    try:
+        while True:
+            async with semaphore:
+                job_factory = await _notification_queue.get()
+                try:
+                    await job_factory()
+                except Exception:
+                    logger.exception("Failed to dispatch queued alert notification")
+                finally:
+                    _notification_queue.task_done()
+    except asyncio.CancelledError:
+        raise
+
+
+async def ensure_notification_worker() -> None:
+    """Start the queue worker once for the process lifetime."""
+    global _notification_worker_tasks
+
+    if _notification_worker_tasks and any(not task.done() for task in _notification_worker_tasks):
+        return
+
+    async with _notification_worker_lock:
+        if _notification_worker_tasks and any(not task.done() for task in _notification_worker_tasks):
+            return
+        semaphore = asyncio.Semaphore(_NOTIFICATION_WORKER_CONCURRENCY)
+        _notification_worker_tasks = [
+            asyncio.create_task(_notification_worker(semaphore))
+            for _ in range(_NOTIFICATION_WORKER_CONCURRENCY)
+        ]
+
+
+async def shutdown_notification_worker() -> None:
+    """Stop the queue worker cleanly during app shutdown."""
+    global _notification_worker_tasks
+
+    if not _notification_worker_tasks:
+        return
+
+    try:
+        await asyncio.wait_for(_notification_queue.join(), timeout=_NOTIFICATION_DRAIN_TIMEOUT)
+    except asyncio.TimeoutError:
+        logger.warning(
+            "Timed out waiting %.1fs for notification queue to drain before shutdown",
+            _NOTIFICATION_DRAIN_TIMEOUT,
+        )
+
+    for task in _notification_worker_tasks:
+        task.cancel()
+
+    try:
+        await asyncio.gather(*_notification_worker_tasks, return_exceptions=True)
+    finally:
+        _notification_worker_tasks = []
+
+
+def _enqueue_notification(job_factory: Callable[[], Awaitable[None]]) -> None:
+    """Queue a notification job, dropping the oldest item on overflow."""
+    if _notification_queue.full():
+        try:
+            _notification_queue.get_nowait()
+            _notification_queue.task_done()
+            logger.warning("Notification queue full. Dropping oldest pending notification.")
+        except asyncio.QueueEmpty:
+            logger.warning("Notification queue reported full but was empty when trimming.")
+
+    try:
+        _notification_queue.put_nowait(job_factory)
+    except asyncio.QueueFull:
+        logger.warning("Notification queue still full after trimming. Dropping new notification.")
+
 
 async def _notify_new_alerts(alerts: list[Alert]) -> None:
-    """Fire notifications for newly appeared alerts."""
+    """Queue notifications for newly appeared or resolved alerts."""
     global _previously_seen_alerts
     current_ids = {a.id for a in alerts if a.status == AlertStatus.ACTIVE}
     new_ids = current_ids - _previously_seen_alerts
@@ -40,6 +121,7 @@ async def _notify_new_alerts(alerts: list[Alert]) -> None:
         _previously_seen_alerts = current_ids
         return
 
+    await ensure_notification_worker()
     alert_map = {a.id: a for a in alerts}
 
     for alert_id in new_ids:
@@ -47,17 +129,27 @@ async def _notify_new_alerts(alerts: list[Alert]) -> None:
         if not alert:
             continue
         severity = alert.severity.value if hasattr(alert.severity, "value") else str(alert.severity)
-        asyncio.create_task(notification_service.dispatch(
-            alert_id=alert.id, alert_type="alert", severity=severity,
-            device=alert.device_id, message=alert.message,
-            details=alert.details or "", config=config_dict, demo=settings.demo_mode,
+        _enqueue_notification(lambda alert=alert, severity=severity: notification_service.dispatch(
+            alert_id=alert.id,
+            alert_type="alert",
+            severity=severity,
+            device=alert.device_id,
+            message=alert.message,
+            details=alert.details or "",
+            config=config_dict,
+            demo=settings.demo_mode,
         ))
 
     for alert_id in resolved_ids:
-        asyncio.create_task(notification_service.dispatch(
-            alert_id=alert_id, alert_type="recovery", severity="info",
-            device=alert_id, message=f"Alert resolved: {alert_id}",
-            config=config_dict, demo=settings.demo_mode, is_recovery=True,
+        _enqueue_notification(lambda alert_id=alert_id: notification_service.dispatch(
+            alert_id=alert_id,
+            alert_type="recovery",
+            severity="info",
+            device=alert_id,
+            message=f"Alert resolved: {alert_id}",
+            config=config_dict,
+            demo=settings.demo_mode,
+            is_recovery=True,
         ))
 
     _previously_seen_alerts = current_ids
@@ -113,7 +205,7 @@ async def _get_librenms_alerts() -> list[Alert]:
             if timestamp_str:
                 try:
                     timestamp = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
-                except:
+                except Exception:
                     timestamp = datetime.utcnow()
             else:
                 timestamp = datetime.utcnow()
@@ -164,7 +256,7 @@ async def list_alerts(status: AlertStatus | None = None):
     # Sort by timestamp (newest first)
     all_alerts.sort(key=lambda a: a.timestamp, reverse=True)
 
-    # Fire notifications for new/resolved alerts (non-blocking)
+    # Fire notifications for new/resolved alerts (non-blocking queue)
     await _notify_new_alerts(all_alerts)
 
     return [

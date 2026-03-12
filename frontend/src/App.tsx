@@ -20,7 +20,7 @@ import { fetchTopology, fetchSpeedtest } from './api/endpoints'
 //   window.watchtower.listDevices()
 //   window.watchtower.setSpeedtestDown()    // Turn external links red
 //   window.watchtower.setSpeedtestNormal()  // Turn external links green
-if (typeof window !== 'undefined') {
+if (import.meta.env.DEV && typeof window !== 'undefined') {
   ;(window as unknown as { watchtower: unknown }).watchtower = {
     setDeviceDown: (deviceId: string) => {
       useNocStore.getState().updateDeviceStatus(deviceId, 'down')
