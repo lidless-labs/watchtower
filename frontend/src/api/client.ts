@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { useAuthStore } from '../store/authStore'
 
 const API_BASE = '/api'
 
@@ -23,9 +24,8 @@ apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      // Clear token and redirect to login
-      localStorage.removeItem('watchtower_token')
-      // In a real app, redirect to login page
+      // Clear auth state - this will trigger redirect to login
+      useAuthStore.getState().handleAuthError()
     }
     return Promise.reject(error)
   }
