@@ -116,19 +116,21 @@ async def _run_and_broadcast() -> None:
 
     result = await run_speedtest(server_id=server_id)
 
-    # Cache result
-    await cache_result(result)
+    # Only cache successful results - don't overwrite good data with errors
+    if result.status == "success":
+        await cache_result(result)
 
-    # Log to CSV if configured
+    # Log to CSV if configured (log both success and failure for diagnostics)
     if speedtest_config and speedtest_config.logging.enabled:
         log_to_csv(result, speedtest_config.logging.path)
 
-    # Broadcast to WebSocket clients
-    await ws_manager.broadcast({
-        "type": "speedtest_result",
-        "timestamp": datetime.utcnow().isoformat(),
-        "result": result.to_dict(),
-    })
+    # Broadcast to WebSocket clients (only success - don't flash errors to UI)
+    if result.status == "success":
+        await ws_manager.broadcast({
+            "type": "speedtest_result",
+            "timestamp": datetime.utcnow().isoformat(),
+            "result": result.to_dict(),
+        })
 
 
 @router.get("/export")

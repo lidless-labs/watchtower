@@ -123,9 +123,11 @@ function App() {
   const checkAuth = useAuthStore((state) => state.checkAuth)
   const clearInitialSetupFlag = useAuthStore((state) => state.clearInitialSetupFlag)
   const [showSetupToast, setShowSetupToast] = useState(false)
+  const [authChecked, setAuthChecked] = useState(false)
 
   useEffect(() => {
-    checkAuth()
+    // Validate token with server on app load
+    checkAuth().finally(() => setAuthChecked(true))
   }, [checkAuth])
 
   useEffect(() => {
@@ -159,7 +161,7 @@ function App() {
     loadConfig()
   }, [])
 
-  if (!configLoaded) {
+  if (!configLoaded || !authChecked) {
     return (
       <div className="min-h-screen bg-bg-primary text-text-secondary flex items-center justify-center">
         Loading...

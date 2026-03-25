@@ -639,19 +639,21 @@ async def poll_speedtest() -> None:
         # Run the speedtest
         result = await run_speedtest(server_id=server_id)
 
-        # Cache result in Redis
-        await cache_result(result)
+        # Only cache successful results - don't overwrite good data with errors
+        if result.status == "success":
+            await cache_result(result)
 
-        # Log to CSV if configured
+        # Log to CSV if configured (log both success and failure for diagnostics)
         logging_config = getattr(speedtest_config, "logging", None)
         if logging_config and getattr(logging_config, "enabled", False):
             csv_path = getattr(logging_config, "path", None)
             if csv_path:
                 speedtest_log_to_csv(result, csv_path)
 
-        # Broadcast to WebSocket clients
+        # Broadcast to WebSocket clients (only success - don't flash errors to UI)
         result_dict = result.to_dict()
-        await broadcast_speedtest_result(result_dict)
+        if result.status == "success":
+            await broadcast_speedtest_result(result_dict)
 
         _fire_and_forget_history(
             history_writer.write_speedtest(result_dict),

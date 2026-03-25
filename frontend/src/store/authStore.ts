@@ -27,8 +27,9 @@ interface AuthState {
   initialSetupComplete: boolean
   login: (username: string, password: string) => Promise<void>
   logout: () => void
-  checkAuth: () => boolean
+  checkAuth: () => Promise<boolean>
   clearInitialSetupFlag: () => void
+  handleAuthError: () => void
 }
 
 function decodeJwtPayload(token: string): JwtPayload | null {
@@ -90,22 +91,33 @@ export const useAuthStore = create<AuthState>()(
         })
       },
 
-      checkAuth: () => {
+      checkAuth: async () => {
         const token = get().token ?? localStorage.getItem('watchtower_token')
 
+        // Quick client-side check first
         if (!token || isTokenExpired(token)) {
           localStorage.removeItem('watchtower_token')
           set({ token: null, user: null, isAuthenticated: false, initialSetupComplete: false })
           return false
         }
 
-        if (!get().token) {
-          set({ token, isAuthenticated: true })
-        } else {
-          set({ isAuthenticated: true })
+        // Validate token with server to ensure it's still valid
+        try {
+          const response = await apiClient.get<AuthUser>('/auth/me')
+          set({ token, user: response.data, isAuthenticated: true })
+          return true
+        } catch {
+          // Token is invalid or expired - clear auth state
+          localStorage.removeItem('watchtower_token')
+          set({ token: null, user: null, isAuthenticated: false, initialSetupComplete: false })
+          return false
         }
+      },
 
-        return true
+      handleAuthError: () => {
+        // Called when a 401 is received - clear auth state
+        localStorage.removeItem('watchtower_token')
+        set({ token: null, user: null, isAuthenticated: false })
       },
 
       clearInitialSetupFlag: () => set({ initialSetupComplete: false }),
