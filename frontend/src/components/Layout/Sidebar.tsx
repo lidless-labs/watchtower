@@ -5,6 +5,7 @@ import ConnectionCard from '../Sidebar/ConnectionCard'
 import NetworkSummary from '../Sidebar/NetworkSummary'
 import PhysicalLinksPanel from '../Sidebar/PhysicalLinksPanel'
 import SpeedtestWidget from '../Sidebar/SpeedtestWidget'
+import TopInterfacesWidget from '../Sidebar/TopInterfacesWidget'
 import PortGroupWidget from '../Sidebar/PortGroupWidget'
 import PortSearchWidget from '../Sidebar/PortSearchWidget'
 
@@ -66,6 +67,7 @@ export default function Sidebar() {
             <div data-tour="speedtest-widget">
               <SpeedtestWidget />
             </div>
+            <TopInterfacesWidget />
             <PortGroupWidget />
             <PortSearchWidget />
             <div data-tour="network-summary">

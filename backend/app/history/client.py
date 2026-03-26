@@ -70,8 +70,9 @@ class InfluxHistoryClient:
             return False
 
         try:
-            health = await self._client.health()
-            return str(getattr(health, "status", "")).lower() == "pass"
+            # The async client uses ping() instead of health()
+            result = await self._client.ping()
+            return result
         except Exception as e:
             logger.warning("InfluxDB health check failed: %s", e)
             return False
