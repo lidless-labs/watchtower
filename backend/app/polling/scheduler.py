@@ -181,7 +181,9 @@ class PollingScheduler:
 
 def _fire_and_forget_history(coro: Any, operation: str) -> None:
     """Run history write in background and only log failures."""
-    if settings.demo_mode or not settings.influxdb_enabled or not influx_client.is_connected():
+    config = get_config()
+    influx_enabled = settings.influxdb_enabled or config.influxdb.enabled
+    if settings.demo_mode or not influx_enabled or not influx_client.is_connected():
         return
 
     async def _runner() -> None:

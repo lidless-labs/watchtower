@@ -15,8 +15,8 @@ from typing import Any
 
 from fastapi import APIRouter, Query
 
-from app.config import settings
-from app.history import demo_history_store, history_reader
+from app.config import settings, get_config
+from app.history import demo_history_store, history_reader, csv_history_reader
 
 router = APIRouter()
 
@@ -50,7 +50,14 @@ def _resolve_window(
 
 
 def _reader():
-    return demo_history_store if settings.demo_mode else history_reader
+    if settings.demo_mode:
+        return demo_history_store
+    # Check both settings and yaml config for InfluxDB enabled state
+    config = get_config()
+    if settings.influxdb_enabled or config.influxdb.enabled:
+        return history_reader
+    # Fall back to CSV reader when InfluxDB is not configured
+    return csv_history_reader
 
 
 def _merge_series_to_points(series: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
@@ -209,13 +216,27 @@ async def get_speedtest_history(
 ):
     """Return merged points: [{time, download_mbps, upload_mbps, ping_ms, jitter_ms}]."""
     start_expr, stop_expr, aggregate_window = _resolve_window(range, start, stop, aggregate)
-    data = await _reader().get_speedtest_history(start_expr, stop_expr, aggregate_window)
 
-    # Normalize: demo_store returns {series: {...}}, convert to {points: [...]}
-    series = data.get("series", {})
-    if series:
-        points = _merge_series_to_points(series)
+    # Always get CSV data as baseline (has historical data)
+    csv_data = await csv_history_reader.get_speedtest_history(start_expr, stop_expr, aggregate_window)
+    csv_points = csv_data.get("points", [])
+
+    # If InfluxDB is enabled, also get data from there and merge
+    config = get_config()
+    if settings.influxdb_enabled or config.influxdb.enabled:
+        influx_data = await history_reader.get_speedtest_history(start_expr, stop_expr, aggregate_window)
+        series = influx_data.get("series", {})
+        if series:
+            influx_points = _merge_series_to_points(series)
+        else:
+            influx_points = influx_data.get("points", [])
+
+        # Merge: use a dict keyed by time to deduplicate, preferring InfluxDB data
+        points_map = {p["time"]: p for p in csv_points}
+        for p in influx_points:
+            points_map[p["time"]] = p  # InfluxDB data overwrites CSV for same timestamp
+        points = sorted(points_map.values(), key=lambda p: p["time"])
     else:
-        points = data.get("points", [])
+        points = csv_points
 
     return {"points": points, "range": range}
