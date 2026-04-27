@@ -7,7 +7,7 @@ from typing import Any
 
 import yaml
 from pydantic import BaseModel
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class AuthConfig(BaseModel):
@@ -228,9 +228,7 @@ class Settings(BaseSettings):
     influxdb_bucket: str = "watchtower"
     influxdb_enabled: bool = False
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
 
 def load_yaml_config(path: str) -> dict[str, Any]:
