@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from app.config import get_config, get_settings
+from app.config import get_settings
 
 router = APIRouter(prefix="/paloalto", tags=["paloalto"])
 

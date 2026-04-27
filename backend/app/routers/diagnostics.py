@@ -8,7 +8,7 @@ from app.cache import redis_cache
 from app.polling.librenms import LibreNMSClient
 from app.polling.netdisco import NetdiscoClient
 from app.polling.proxmox import ProxmoxClient
-from app.polling.scheduler import scheduler, poll_device_status, poll_alerts, CACHE_DEVICES, CACHE_DEVICE_STATUS, CACHE_ALERTS, CACHE_LAST_POLL, CACHE_PROXMOX, CACHE_PROXMOX_VMS
+from app.polling.scheduler import scheduler, CACHE_DEVICES, CACHE_ALERTS, CACHE_LAST_POLL, CACHE_PROXMOX, CACHE_PROXMOX_VMS
 from app.config import get_config, get_settings
 
 logger = logging.getLogger(__name__)
@@ -63,7 +63,7 @@ async def test_librenms():
                 }
             else:
                 return {"status": "error", "message": "Health check failed"}
-    except Exception as e:
+    except Exception:
         logger.exception("LibreNMS connectivity test failed")
         return {"status": "error", "message": "Connection failed. Check server logs for details."}
 
@@ -99,7 +99,7 @@ async def test_netdisco():
                 }
             else:
                 return {"status": "error", "message": "Health check failed"}
-    except Exception as e:
+    except Exception:
         logger.exception("Netdisco connectivity test failed")
         return {"status": "error", "message": "Connection failed. Check server logs for details."}
 
@@ -144,7 +144,7 @@ async def test_proxmox():
                         "url": config.url,
                         "message": "Health check failed",
                     })
-        except Exception as e:
+        except Exception:
             logger.exception("Proxmox connectivity test failed for %s", instance_name)
             results.append({
                 "instance": instance_name,
@@ -228,7 +228,6 @@ async def trigger_poll():
 async def get_cached_devices():
     """View cached device data from last poll."""
     devices = await redis_cache.get_json(CACHE_DEVICES)
-    status = await redis_cache.get_json(CACHE_DEVICE_STATUS)
     last_poll = await redis_cache.get_json(CACHE_LAST_POLL)
 
     if not devices:
