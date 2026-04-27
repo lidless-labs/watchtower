@@ -48,4 +48,4 @@ Thumbs.db
 FRONTEND_DESIGN.md
 POLISH_NOTES.md
 frontend/dist/
-backend/app/__pycache__/
+backend/**/__pycache__/
