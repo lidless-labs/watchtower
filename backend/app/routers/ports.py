@@ -6,7 +6,6 @@ Endpoints for searching ports by description/alias across all devices.
 
 from __future__ import annotations
 
-from typing import Any
 
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
