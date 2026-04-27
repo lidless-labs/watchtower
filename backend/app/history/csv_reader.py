@@ -10,13 +10,30 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from app.config import get_config
 
 
 class CSVHistoryReader:
     """Reads speedtest history from CSV log file."""
 
+    _DEFAULT_FALLBACK_PATH = "/var/lib/watchtower/speedtest.csv"
+
     def __init__(self, csv_path: str | None = None) -> None:
-        self.csv_path = Path(csv_path or "/opt/watchtower/data/speedtest.csv")
+        # When an explicit path is provided we honor it (used for tests and
+        # for callers that want to read a non-default file). Otherwise the
+        # path is resolved per-read so persisting a new
+        # config.speedtest.logging.path through the settings API takes
+        # effect without a process restart.
+        self._explicit_path = Path(csv_path) if csv_path else None
+
+    @property
+    def csv_path(self) -> Path:
+        if self._explicit_path is not None:
+            return self._explicit_path
+        try:
+            return Path(get_config().speedtest.logging.path)
+        except Exception:
+            return Path(self._DEFAULT_FALLBACK_PATH)
 
     @staticmethod
     def _parse_time_expr(value: str | None, default: datetime) -> datetime:
