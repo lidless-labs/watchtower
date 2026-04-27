@@ -182,6 +182,9 @@ def _fire_and_forget_history(coro: Any, operation: str) -> None:
     config = get_config()
     influx_enabled = settings.influxdb_enabled or config.influxdb.enabled
     if settings.demo_mode or not influx_enabled or not influx_client.is_connected():
+        # Caller already constructed the coroutine; close it explicitly so
+        # the GC doesn't surface a "coroutine was never awaited" warning.
+        coro.close()
         return
 
     async def _runner() -> None:
