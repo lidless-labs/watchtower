@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .auth import get_current_user
 from .cache import redis_cache
-from .config import config, settings, get_config  # noqa: F401  # bound via `global config` in lifespan
+from .config import config, settings, persist_config, reload_config
 from .polling import scheduler
 from .routers import alerts_router, devices_router, topology_router, history_router, settings_router
 from .routers.alerts import shutdown_notification_worker
@@ -26,8 +26,6 @@ from .websocket import websocket_endpoint, ws_manager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan - startup and shutdown events."""
-    global config  # noqa: PLW0603 — needed to reassign module-level singleton
-
     import asyncio
     import logging
     import secrets
@@ -49,17 +47,25 @@ async def lifespan(app: FastAPI):
         print("[DEMO] Demo mode active - using simulated data")
     else:
         # Production mode: start real polling scheduler if LibreNMS is configured
-        config = get_config()
+        reload_config()
 
         # ── JWT secret safety check (after config reload) ────────────────
         if config.auth.jwt_secret == "change-me-in-production":
             generated = secrets.token_urlsafe(32)
-            config.auth.jwt_secret = generated
-            logger.critical(
-                "JWT secret is still the default 'change-me-in-production'! "
-                "A random secret has been generated for THIS session. "
-                "Set auth.jwt_secret in config.yaml for persistent sessions."
-            )
+            try:
+                persist_config({"auth": {"jwt_secret": generated}})
+                logger.warning(
+                    "JWT secret was the default placeholder; generated a "
+                    "random one and persisted it to config.yaml."
+                )
+            except Exception as exc:
+                config.auth.jwt_secret = generated
+                logger.critical(
+                    "JWT secret was the default placeholder; persist failed "
+                    "(%s). Using random secret for THIS session only. Sessions "
+                    "will NOT survive a restart until config.yaml is writable.",
+                    exc,
+                )
 
         # Sync YAML config → env settings for InfluxDB
         if config.influxdb.enabled or settings.influxdb_enabled:
