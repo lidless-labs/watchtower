@@ -19,7 +19,7 @@ apscheduler==3.10.4
 
 # Authentication
 bcrypt==4.1.2
-PyJWT==2.8.0
+PyJWT==2.10.1
 
 # Data validation
 pydantic==2.10.4
