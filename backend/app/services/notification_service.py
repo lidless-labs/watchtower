@@ -4,11 +4,10 @@ Dispatches alerts to Discord, Pushover, and Email based on config.
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
 from collections import deque
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
