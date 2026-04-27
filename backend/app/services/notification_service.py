@@ -4,11 +4,10 @@ Dispatches alerts to Discord, Pushover, and Email based on config.
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
 from collections import deque
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -16,7 +15,13 @@ from typing import Optional
 
 import httpx
 
+from ..ratelimit import claim_cooldown, release_cooldown, sliding_window_check
+
 logger = logging.getLogger("watchtower.notifications")
+
+# Global notification cap (across all channels) to prevent storm-loops.
+_GLOBAL_RATE_LIMIT = 30
+_GLOBAL_RATE_WINDOW = 60
 
 SEVERITY_COLORS = {
     "critical": 0xFF0000,
@@ -62,9 +67,7 @@ class DeliveryRecord:
 class NotificationService:
     def __init__(self):
         self.history: deque[DeliveryRecord] = deque(maxlen=200)
-        self._cooldown_map: dict[str, float] = {}  # alert_key -> last_sent_ts
         self._counter = 0
-        self._rate_window: deque[float] = deque(maxlen=100)
         self._stats = {"sent": 0, "failed": 0, "cooldown": 0, "demo": 0}
 
     def _next_id(self) -> str:
@@ -72,20 +75,7 @@ class NotificationService:
         return f"ntf-{self._counter:05d}"
 
     def _cooldown_key(self, alert_id: str, channel: str) -> str:
-        return f"{channel}:{alert_id}"
-
-    def _is_cooled_down(self, key: str, cooldown_minutes: int) -> bool:
-        last = self._cooldown_map.get(key)
-        if last is None:
-            return False
-        return (time.time() - last) < (cooldown_minutes * 60)
-
-    def _is_rate_limited(self) -> bool:
-        now = time.time()
-        # Clean old entries (older than 60s)
-        while self._rate_window and self._rate_window[0] < now - 60:
-            self._rate_window.popleft()
-        return len(self._rate_window) >= 30
+        return f"watchtower:notify:cooldown:{channel}:{alert_id}"
 
     async def dispatch(
         self,
@@ -157,18 +147,33 @@ class NotificationService:
             status="pending", timestamp=time.time(),
         )
 
-        # Cooldown check
         ck = self._cooldown_key(alert_id, channel)
-        if not is_recovery and self._is_cooled_down(ck, cooldown_min):
-            record.status = "cooldown"
-            self._stats["cooldown"] += 1
-            self.history.append(record)
-            return record
+        cooldown_seconds = max(cooldown_min * 60, 0)
 
-        # Rate limit
-        if self._is_rate_limited():
+        # Atomic claim FIRST so a burst of duplicate alerts only charges the
+        # global rate-limit quota for the one that actually proceeds. Skip for
+        # recoveries so a fresh-alert cooldown never suppresses the matching recovery.
+        cooldown_token: str | None = None
+        if not is_recovery:
+            cooldown_token = await claim_cooldown(ck, cooldown_seconds)
+            if cooldown_token is None:
+                record.status = "cooldown"
+                self._stats["cooldown"] += 1
+                self.history.append(record)
+                return record
+
+        allowed, _ = await sliding_window_check(
+            "watchtower:notify:ratelimit:global",
+            _GLOBAL_RATE_LIMIT,
+            _GLOBAL_RATE_WINDOW,
+        )
+        if not allowed:
+            # Release our cooldown (CAS-safe via token) so the next legitimate
+            # dispatch isn't blocked by a claim we made for a notification we never sent.
+            if cooldown_token is not None:
+                await release_cooldown(ck, cooldown_token)
             record.status = "failed"
-            record.error = "Rate limited (30/min)"
+            record.error = f"Rate limited ({_GLOBAL_RATE_LIMIT}/{_GLOBAL_RATE_WINDOW}s)"
             self._stats["failed"] += 1
             self.history.append(record)
             return record
@@ -178,13 +183,12 @@ class NotificationService:
             record.status = "demo"
             record.response_code = 200
             self._stats["demo"] += 1
-            self._cooldown_map[ck] = time.time()
-            self._rate_window.append(time.time())
             self.history.append(record)
             logger.info(f"[DEMO] Notification to {channel}: {message}")
             return record
 
-        # Real dispatch
+        # Real dispatch. Cooldown is already claimed, so a failed dispatch
+        # throttles retries until the cooldown elapses (acts as a circuit breaker).
         try:
             if channel == "discord":
                 await self._send_discord(channel_cfg, severity, device, message, details, is_recovery)
@@ -196,14 +200,12 @@ class NotificationService:
             record.status = "success"
             record.response_code = 200
             self._stats["sent"] += 1
-            self._cooldown_map[ck] = time.time()
         except Exception as exc:
             record.status = "failed"
             record.error = str(exc)[:200]
             self._stats["failed"] += 1
             logger.error(f"Notification to {channel} failed: {exc}")
 
-        self._rate_window.append(time.time())
         self.history.append(record)
         return record
 

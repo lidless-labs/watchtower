@@ -1,12 +1,11 @@
 """Configuration loader for Watchtower."""
 
 import copy
-import os
 from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 
 
@@ -113,7 +112,8 @@ class NotificationChannels(BaseModel):
 class NotificationsConfig(BaseModel):
     notify_on: list[str] = ["critical"]
     notify_on_recovery: bool = True
-    cooldown_minutes: int = 5
+    # Capped at 30 days to match the cooldown-key retention window in app/ratelimit.py.
+    cooldown_minutes: int = Field(default=5, ge=0, le=30 * 24 * 60)
     channels: NotificationChannels = NotificationChannels()
 
 
@@ -271,6 +271,24 @@ def get_topology_config() -> dict[str, Any]:
 # Singleton instances
 settings = Settings()
 config = get_config()
+
+
+def _apply_config(new: AppConfig) -> None:
+    """Copy fields from a new AppConfig onto the singleton.
+
+    Why: callers do `from .config import config` at import time, capturing a
+    reference to the singleton. Rebinding `config = ...` only updates the local
+    module name, leaving stale references in every other module. Mutating the
+    existing instance keeps every caller in sync.
+    """
+    for field_name in AppConfig.model_fields:
+        setattr(config, field_name, getattr(new, field_name))
+
+
+def reload_config() -> AppConfig:
+    """Re-read config.yaml and apply it to the singleton in place."""
+    _apply_config(get_config())
+    return config
 
 
 class IntegrationSettings:
@@ -448,8 +466,6 @@ def merge_config(existing: dict, updates: dict) -> dict:
 
 def persist_config(updates: dict) -> None:
     """Merge updates with existing config.yaml and write back, then reload config singleton."""
-    global config
-
     config_path = _config_file_path()
     existing = normalize_legacy_smtp_keys(load_yaml_config(str(config_path))) if config_path.exists() else {}
     merged = normalize_legacy_smtp_keys(merge_config(existing, updates))
@@ -461,4 +477,4 @@ def persist_config(updates: dict) -> None:
     with open(config_path, "w", encoding="utf-8") as f:
         yaml.safe_dump(merged, f, sort_keys=False)
 
-    config = validated
+    _apply_config(validated)
