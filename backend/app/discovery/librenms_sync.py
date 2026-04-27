@@ -14,7 +14,7 @@ from typing import Any
 
 import yaml
 
-from app.polling.librenms import LibreNMSClient, LibreNMSDevice, LibreNMSLink
+from app.polling.librenms import LibreNMSClient, LibreNMSDevice
 from app.config import get_config, get_topology_config, Settings
 
 
@@ -364,9 +364,6 @@ def _merge_connections(
         conn for conn in existing
         if not conn.get("auto_discovered", False)
     ]
-
-    # Build set of discovered connection IDs for reference
-    discovered_ids = {conn["id"] for conn in discovered}
 
     # Also keep manual connections that don't conflict with discovered ones
     final_manual = []

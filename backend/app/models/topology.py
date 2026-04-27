@@ -1,6 +1,5 @@
 """Topology models for Watchtower."""
 
-from typing import Optional
 
 from pydantic import BaseModel
 
