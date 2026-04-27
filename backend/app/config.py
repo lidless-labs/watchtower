@@ -152,7 +152,7 @@ class SpeedtestLogging(BaseModel):
     """CSV logging configuration for speedtest results."""
 
     enabled: bool = True
-    path: str = "/mnt/samba/Shared/Instructors files/Solomon Neas/Watchtower/Speedtest/speedtest.csv"
+    path: str = "/var/lib/watchtower/speedtest.csv"
 
 
 class SpeedtestConfig(BaseModel):

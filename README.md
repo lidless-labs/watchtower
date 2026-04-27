@@ -63,7 +63,7 @@ A modern Network Operations Center dashboard that monitors network devices, inte
 ### Prerequisites
 - Python 3.12+
 - Node.js 20+
-- Redis
+- Docker + Docker Compose (provides Redis and InfluxDB; `docker compose up -d` from the repo root)
 - LibreNMS instance with API access
 
 ### Installation
