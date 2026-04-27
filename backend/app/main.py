@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .auth import get_current_user
 from .cache import redis_cache
-from .config import config, settings, get_config
+from .config import config, settings, get_config  # noqa: F401  # bound via `global config` in lifespan
 from .polling import scheduler
 from .routers import alerts_router, devices_router, topology_router, history_router, settings_router
 from .routers.alerts import shutdown_notification_worker

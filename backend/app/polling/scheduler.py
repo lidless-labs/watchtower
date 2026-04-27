@@ -17,14 +17,12 @@ from apscheduler.triggers.interval import IntervalTrigger
 from app.cache import redis_cache
 from app.config import get_config, get_settings, settings
 from app.history import history_writer, influx_client
-from app.models.device import DeviceStatus
 from app.polling.librenms import LibreNMSClient, LibreNMSDevice
 from app.polling.proxmox import ProxmoxClient
 from app.polling.speedtest import (
     run_speedtest,
     log_to_csv as speedtest_log_to_csv,
     cache_result,
-    CACHE_SPEEDTEST,
 )
 from app.websocket import ws_manager
 
