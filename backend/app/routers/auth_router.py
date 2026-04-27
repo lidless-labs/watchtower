@@ -2,8 +2,6 @@
 
 import logging
 import os
-import time
-from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -13,55 +11,41 @@ from pydantic import BaseModel, Field
 
 from ..auth import UserRole, create_token, get_current_user, hash_password, verify_password
 from ..config import config, load_yaml_config, settings
+from ..ratelimit import sliding_window_check
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 # Max 5 login attempts per IP per 5 minutes.
-_LOGIN_ATTEMPTS: dict[str, list[float]] = {}
 _RATE_LIMIT_MAX = 5
 _RATE_LIMIT_WINDOW = 300
 
-_BOOTSTRAP_ATTEMPTS: dict[str, list[float]] = defaultdict(list)
 _BOOTSTRAP_RATE_LIMIT_MAX = 3
 _BOOTSTRAP_RATE_LIMIT_WINDOW = 60
 
 
-def _check_rate_limit(ip: str) -> None:
+async def _check_rate_limit(ip: str) -> None:
     """Raise 429 if IP exceeds login attempt threshold."""
-    now = time.monotonic()
-    expired_ips = [k for k, v in _LOGIN_ATTEMPTS.items() if v and v[-1] < now - _RATE_LIMIT_WINDOW]
-    for k in expired_ips:
-        del _LOGIN_ATTEMPTS[k]
-
-    attempts = _LOGIN_ATTEMPTS.get(ip, [])
-    attempts = [t for t in attempts if t > now - _RATE_LIMIT_WINDOW]
-    _LOGIN_ATTEMPTS[ip] = attempts
-
-    if len(attempts) >= _RATE_LIMIT_MAX:
+    allowed, _ = await sliding_window_check(
+        f"watchtower:ratelimit:login:{ip}",
+        _RATE_LIMIT_MAX,
+        _RATE_LIMIT_WINDOW,
+    )
+    if not allowed:
         raise HTTPException(status_code=429, detail="Too many login attempts. Try again later.")
 
-    attempts.append(now)
-    _LOGIN_ATTEMPTS[ip] = attempts
 
-
-def _check_bootstrap_rate_limit(ip: str) -> None:
+async def _check_bootstrap_rate_limit(ip: str) -> None:
     """Raise 429 if bootstrap attempts exceed the per-minute cap."""
-    now = time.monotonic()
-
-    expired_ips = [k for k, v in _BOOTSTRAP_ATTEMPTS.items() if v and v[-1] < now - _BOOTSTRAP_RATE_LIMIT_WINDOW]
-    for k in expired_ips:
-        del _BOOTSTRAP_ATTEMPTS[k]
-
-    attempts = [t for t in _BOOTSTRAP_ATTEMPTS.get(ip, []) if t > now - _BOOTSTRAP_RATE_LIMIT_WINDOW]
-    if len(attempts) >= _BOOTSTRAP_RATE_LIMIT_MAX:
-        _BOOTSTRAP_ATTEMPTS[ip] = attempts
+    allowed, _ = await sliding_window_check(
+        f"watchtower:ratelimit:bootstrap:{ip}",
+        _BOOTSTRAP_RATE_LIMIT_MAX,
+        _BOOTSTRAP_RATE_LIMIT_WINDOW,
+    )
+    if not allowed:
         _log_bootstrap_attempt(ip, False, "rate limited")
         raise HTTPException(status_code=429, detail="Too many bootstrap attempts. Try again later.")
-
-    attempts.append(now)
-    _BOOTSTRAP_ATTEMPTS[ip] = attempts
 
 
 class LoginRequest(BaseModel):
@@ -149,7 +133,7 @@ def _authorize_bootstrap(request: Request, client_ip: str) -> None:
 async def login(payload: LoginRequest, request: Request):
     """Authenticate an admin user and return JWT token."""
     client_ip = _client_ip(request)
-    _check_rate_limit(client_ip)
+    await _check_rate_limit(client_ip)
 
     if payload.username != config.auth.admin_user:
         raise HTTPException(status_code=401, detail="Invalid credentials")
@@ -157,7 +141,7 @@ async def login(payload: LoginRequest, request: Request):
     initial_setup = False
 
     if not config.auth.admin_password_hash:
-        _check_bootstrap_rate_limit(client_ip)
+        await _check_bootstrap_rate_limit(client_ip)
         _authorize_bootstrap(request, client_ip)
 
         if len(payload.password) < 8:

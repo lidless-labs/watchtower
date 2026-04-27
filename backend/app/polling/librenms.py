@@ -231,12 +231,16 @@ class LibreNMSClient:
             device_id: Optional device ID to filter links for a specific device
 
         Returns:
-            List of discovered neighbor links
+            List of discovered neighbor links. Returns [] if LibreNMS reports
+            no data (404), matching the behavior of get_vlans / get_device_health.
         """
-        if device_id:
-            data = await self._get(f"/devices/{device_id}/links")
-        else:
-            data = await self._get("/resources/links")
+        try:
+            if device_id:
+                data = await self._get(f"/devices/{device_id}/links")
+            else:
+                data = await self._get("/resources/links")
+        except httpx.HTTPStatusError:
+            return []
         return [LibreNMSLink(**link) for link in data.get("links", [])]
 
     async def get_all_links(self) -> list[LibreNMSLink]:
