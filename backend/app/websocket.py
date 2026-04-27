@@ -4,60 +4,122 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import dataclass
 from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
 
-from .auth import decode_token
+from .auth import UserRole, decode_token
+
+
+# Per-role allowlist of broadcast message types. Admin and operator see the
+# full stream; viewer is restricted to non-sensitive device-status updates so
+# a JWT minted for a read-only user can't observe alert volume, recovery
+# patterns, or speedtest history.
+#
+# Update this map (NOT the call sites) when a new broadcast type is added.
+_FULL_BROADCAST = frozenset({
+    "device_status_change",
+    "new_alerts",
+    "alerts_resolved",
+    "speedtest_result",
+})
+
+ROLE_ALLOWED_MESSAGE_TYPES: dict[str, frozenset[str]] = {
+    UserRole.ADMIN.value: _FULL_BROADCAST,
+    UserRole.OPERATOR.value: _FULL_BROADCAST,
+    UserRole.VIEWER.value: frozenset({"device_status_change"}),
+}
+
+
+def _is_allowed(role: str, message_type: str | None) -> bool:
+    """True if a client with `role` should receive a broadcast of this type.
+
+    Unknown message types are treated conservatively: only admin/operator see
+    them, so a new broadcast added without updating the allowlist defaults
+    closed for viewers (information disclosure is the failure mode we care
+    about). Roles outside the known set get nothing.
+    """
+    allowed = ROLE_ALLOWED_MESSAGE_TYPES.get(role)
+    if allowed is None:
+        return False
+    if message_type is None:
+        return False
+    if message_type in allowed:
+        return True
+    # Unknown type: only admin/operator (which have _FULL_BROADCAST) see it.
+    return allowed is _FULL_BROADCAST
+
+
+@dataclass
+class _Connection:
+    websocket: WebSocket
+    role: str
 
 
 class ConnectionManager:
-    """Manages WebSocket connections and broadcasts."""
+    """Manages WebSocket connections and role-aware broadcasts."""
 
     def __init__(self):
-        self.active_connections: list[WebSocket] = []
+        self._connections: list[_Connection] = []
         self._lock = asyncio.Lock()
 
-    async def connect(self, websocket: WebSocket) -> None:
-        """Accept a new authenticated WebSocket connection."""
+    async def connect(self, websocket: WebSocket, role: str) -> None:
+        """Accept a new authenticated WebSocket connection.
+
+        Caller must already have authenticated the JWT and resolved a role.
+        """
         await websocket.accept()
         async with self._lock:
-            self.active_connections.append(websocket)
+            self._connections.append(_Connection(websocket=websocket, role=role))
 
     async def disconnect(self, websocket: WebSocket) -> None:
         """Remove a WebSocket connection."""
         async with self._lock:
-            if websocket in self.active_connections:
-                self.active_connections.remove(websocket)
+            self._connections = [c for c in self._connections if c.websocket is not websocket]
 
     async def send_personal(self, message: dict[str, Any], websocket: WebSocket) -> None:
-        """Send a message to a specific client."""
+        """Send a message to a specific client, bypassing role filtering."""
         try:
             await websocket.send_json(message)
         except Exception:
             await self.disconnect(websocket)
 
     async def broadcast(self, message: dict[str, Any]) -> None:
-        """Broadcast a message to all connected clients."""
-        if not self.active_connections:
+        """Broadcast a message to all connected clients whose role allows it.
+
+        Filtering is done by `message["type"]`. Connections whose role does
+        not include this message type are silently skipped.
+        """
+        if not self._connections:
             return
 
-        disconnected = []
+        message_type = message.get("type")
+        disconnected: list[WebSocket] = []
         async with self._lock:
-            for connection in self.active_connections:
+            for conn in self._connections:
+                if not _is_allowed(conn.role, message_type):
+                    continue
                 try:
-                    await connection.send_json(message)
+                    await conn.websocket.send_json(message)
                 except Exception:
-                    disconnected.append(connection)
+                    disconnected.append(conn.websocket)
 
-        for conn in disconnected:
-            await self.disconnect(conn)
+        for ws in disconnected:
+            await self.disconnect(ws)
 
     @property
     def connection_count(self) -> int:
         """Return the number of active connections."""
-        return len(self.active_connections)
+        return len(self._connections)
+
+    @property
+    def active_connections(self) -> list[WebSocket]:
+        """Read-only view kept for backward compatibility with tests/diagnostics
+        that just want the websocket list. Prefer `connection_count` for a
+        plain count, or extend ConnectionManager directly for new uses."""
+        return [c.websocket for c in self._connections]
 
 
 ws_manager = ConnectionManager()
@@ -108,18 +170,30 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         await _close_unauthorized(websocket)
         return
 
+    role = user.get("role") or ""
+    # An authenticated JWT with no role (or an unknown role) has no broadcast
+    # subscription, so fail closed rather than silently letting the client
+    # sit attached and receive nothing.
+    if role not in ROLE_ALLOWED_MESSAGE_TYPES:
+        await _close_unauthorized(websocket)
+        return
+
     if websocket.application_state != WebSocketState.CONNECTED:
-        await ws_manager.connect(websocket)
+        await ws_manager.connect(websocket, role)
     else:
         async with ws_manager._lock:
-            if websocket not in ws_manager.active_connections:
-                ws_manager.active_connections.append(websocket)
+            already_attached = any(
+                c.websocket is websocket for c in ws_manager._connections
+            )
+            if not already_attached:
+                ws_manager._connections.append(_Connection(websocket=websocket, role=role))
 
     await ws_manager.send_personal(
         {
             "type": "connected",
             "message": "Connected to Watchtower",
             "user": user,
+            "subscriptions": sorted(ROLE_ALLOWED_MESSAGE_TYPES[role]),
         },
         websocket,
     )
