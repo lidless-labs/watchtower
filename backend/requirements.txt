@@ -1,9 +1,9 @@
 # Watchtower Backend Dependencies
 
 # Web framework
-fastapi==0.109.2
-uvicorn[standard]==0.27.1
-python-multipart==0.0.9
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+python-multipart==0.0.18
 
 # Async HTTP client
 httpx==0.26.0
