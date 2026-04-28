@@ -20,13 +20,14 @@ from .routers.paloalto import router as paloalto_router
 from .routers.portgroups import router as portgroups_router
 from .routers.ports import router as ports_router
 from .routers.notifications import router as notifications_router
-from .websocket import websocket_endpoint, ws_manager
+from .websocket import revalidate_loop, websocket_endpoint, ws_manager
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan - startup and shutdown events."""
     import asyncio
+    import contextlib
     import logging
     import secrets
 
@@ -86,7 +87,14 @@ async def lifespan(app: FastAPI):
         if config.data_sources.librenms.url:
             scheduler.start()
 
-    yield
+    revalidate_task = asyncio.create_task(revalidate_loop(ws_manager))
+
+    try:
+        yield
+    finally:
+        revalidate_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await revalidate_task
 
     # Shutdown
     if not settings.demo_mode and settings.influxdb_enabled:
