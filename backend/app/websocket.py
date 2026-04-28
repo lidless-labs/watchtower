@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Awaitable, Callable
 
-from fastapi import WebSocket, WebSocketDisconnect
+from fastapi import HTTPException, WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
 
 from .auth import UserRole, decode_token
+
+logger = logging.getLogger(__name__)
 
 
 # Per-role allowlist of broadcast message types. Admin and operator see the
@@ -56,6 +59,7 @@ def _is_allowed(role: str, message_type: str | None) -> bool:
 class _Connection:
     websocket: WebSocket
     role: str
+    token: str
 
 
 class ConnectionManager:
@@ -65,14 +69,19 @@ class ConnectionManager:
         self._connections: list[_Connection] = []
         self._lock = asyncio.Lock()
 
-    async def connect(self, websocket: WebSocket, role: str) -> None:
+    async def connect(self, websocket: WebSocket, role: str, token: str) -> None:
         """Accept a new authenticated WebSocket connection.
 
         Caller must already have authenticated the JWT and resolved a role.
+        The raw token is retained so the revalidation sweep can re-decode it
+        on each tick and close sockets whose JWT has since expired or whose
+        signing secret has rotated.
         """
         await websocket.accept()
         async with self._lock:
-            self._connections.append(_Connection(websocket=websocket, role=role))
+            self._connections.append(
+                _Connection(websocket=websocket, role=role, token=token)
+            )
 
     async def disconnect(self, websocket: WebSocket) -> None:
         """Remove a WebSocket connection."""
@@ -131,12 +140,14 @@ async def _close_unauthorized(websocket: WebSocket) -> None:
     await websocket.close(code=4001)
 
 
-async def _authenticate_websocket(websocket: WebSocket) -> dict[str, Any] | None:
+async def _authenticate_websocket(
+    websocket: WebSocket,
+) -> tuple[dict[str, Any], str] | None:
     token = (websocket.query_params.get("token") or "").strip()
 
     if token:
         try:
-            return decode_token(token)
+            return decode_token(token), token
         except Exception:
             return None
 
@@ -158,18 +169,19 @@ async def _authenticate_websocket(websocket: WebSocket) -> dict[str, Any] | None
         return None
 
     try:
-        return decode_token(candidate)
+        return decode_token(candidate), candidate
     except Exception:
         return None
 
 
 async def websocket_endpoint(websocket: WebSocket) -> None:
     """WebSocket endpoint handler."""
-    user = await _authenticate_websocket(websocket)
-    if not user:
+    auth = await _authenticate_websocket(websocket)
+    if not auth:
         await _close_unauthorized(websocket)
         return
 
+    user, token = auth
     role = user.get("role") or ""
     # An authenticated JWT with no role (or an unknown role) has no broadcast
     # subscription, so fail closed rather than silently letting the client
@@ -179,14 +191,16 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         return
 
     if websocket.application_state != WebSocketState.CONNECTED:
-        await ws_manager.connect(websocket, role)
+        await ws_manager.connect(websocket, role, token)
     else:
         async with ws_manager._lock:
             already_attached = any(
                 c.websocket is websocket for c in ws_manager._connections
             )
             if not already_attached:
-                ws_manager._connections.append(_Connection(websocket=websocket, role=role))
+                ws_manager._connections.append(
+                    _Connection(websocket=websocket, role=role, token=token)
+                )
 
     await ws_manager.send_personal(
         {
@@ -209,3 +223,80 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 pass
     except WebSocketDisconnect:
         await ws_manager.disconnect(websocket)
+
+
+# Default sweep period. 60s gives 0.2% slop on an 8h session, which is below
+# any reasonable detection threshold for stale auth and avoids creating a
+# config knob nobody asks for.
+_REVALIDATION_INTERVAL_DEFAULT = 60.0
+# Match the connect-time rejection code in `_close_unauthorized` so the
+# frontend sees one consistent "auth refused" signal.
+_EXPIRED_CLOSE_CODE = 4001
+
+
+async def _revalidate_once(manager: ConnectionManager) -> None:
+    """Decode every live connection's stored token; close the ones that fail.
+
+    Three phases, two lock sections:
+
+    1. Snapshot `(websocket, token)` pairs under lock.
+    2. Decode each token outside the lock; build the victim list.
+    3. Re-acquire the lock and remove victims from `_connections` BEFORE
+       awaiting `ws.close()`. Removal under the lock is what prevents a
+       concurrent `broadcast()` from sending to a doomed socket while we
+       are closing it; Starlette WebSockets are not safe for concurrent
+       send + close on the same connection.
+    4. Close each victim outside the lock. `manager.disconnect` is then a
+       no-op (idempotent identity removal) but is still called so a
+       broken-connection branch in broadcast can also feed cleanup
+       through the same path.
+    """
+    async with manager._lock:
+        snapshot = [(c.websocket, c.token) for c in manager._connections]
+
+    victims: list[WebSocket] = []
+    for ws, token in snapshot:
+        try:
+            decode_token(token)
+        except HTTPException:
+            victims.append(ws)
+
+    if not victims:
+        return
+
+    victim_ids = {id(ws) for ws in victims}
+    async with manager._lock:
+        manager._connections = [
+            c for c in manager._connections if id(c.websocket) not in victim_ids
+        ]
+
+    for ws in victims:
+        try:
+            await ws.close(code=_EXPIRED_CLOSE_CODE)
+        except Exception:
+            # Already-closed sockets raise here; we still want any defensive
+            # cleanup downstream to fire.
+            pass
+        await manager.disconnect(ws)
+
+
+async def revalidate_loop(
+    manager: ConnectionManager,
+    interval: float = _REVALIDATION_INTERVAL_DEFAULT,
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+) -> None:
+    """Periodically re-decode every live connection's JWT and close expired ones.
+
+    A single decode bug or logger glitch must not silently kill the background
+    task and leave the system without revalidation, so we catch everything
+    that is not a `CancelledError`. Cancellation propagates so lifespan
+    shutdown stays deterministic.
+    """
+    while True:
+        try:
+            await sleep(interval)
+            await _revalidate_once(manager)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("ws revalidate sweep failed; continuing")
