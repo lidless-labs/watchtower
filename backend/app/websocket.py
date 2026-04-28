@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
 from fastapi import HTTPException, WebSocket, WebSocketDisconnect
@@ -60,6 +60,13 @@ class _Connection:
     websocket: WebSocket
     role: str
     token: str
+    # Starlette/ASGI WebSockets are not safe for concurrent `send_json` on
+    # the same connection: two coroutines writing to the underlying ASGI
+    # send channel can interleave frame data. Every send call site
+    # (broadcast, send_personal, anything else added later) must take this
+    # lock around `await websocket.send_json(...)` to serialize sends per
+    # connection while leaving cross-connection sends free to overlap.
+    send_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
 class ConnectionManager:
@@ -85,18 +92,63 @@ class ConnectionManager:
 
     async def disconnect(self, websocket: WebSocket) -> None:
         """Remove a WebSocket connection."""
+        await self._drop_websockets([websocket])
+
+    async def _drop_websockets(self, websockets: list[WebSocket]) -> None:
+        """Remove the given websockets from `_connections` by identity.
+
+        Shared cleanup for `broadcast`, `disconnect`, and `_revalidate_once`.
+        Identity (`id()`) keying matters: a Starlette WebSocket subclass or
+        a fake in tests could compare equal to a different instance, and
+        equality-based removal would silently drop the wrong connection.
+        Acquiring the lock once for a batch is also cheaper than per-call
+        churn when broadcast surfaces multiple dead peers in one pass.
+        """
+        if not websockets:
+            return
+        target_ids = {id(ws) for ws in websockets}
         async with self._lock:
-            self._connections = [c for c in self._connections if c.websocket is not websocket]
+            self._connections = [
+                c for c in self._connections if id(c.websocket) not in target_ids
+            ]
 
     async def send_personal(self, message: dict[str, Any], websocket: WebSocket) -> None:
-        """Send a message to a specific client, bypassing role filtering."""
+        """Send a message to a specific client, bypassing role filtering.
+
+        Routes through the registered `_Connection.send_lock` when one exists
+        so a personal send (e.g. the connect-time greeting or a `pong`)
+        cannot interleave frames with a concurrent broadcast on the same
+        websocket. Falls back to a direct send for unmanaged sockets so
+        callers that want to push to a not-yet-registered connection still
+        work.
+        """
+        async with self._lock:
+            conn = next(
+                (c for c in self._connections if c.websocket is websocket),
+                None,
+            )
         try:
-            await websocket.send_json(message)
+            if conn is not None:
+                async with conn.send_lock:
+                    await websocket.send_json(message)
+            else:
+                await websocket.send_json(message)
         except Exception:
             await self.disconnect(websocket)
 
     async def broadcast(self, message: dict[str, Any]) -> None:
         """Broadcast a message to all connected clients whose role allows it.
+
+        Three phases, lock policy mirrors `_revalidate_once`:
+
+        1. Snapshot the recipient list under the lock.
+        2. Await `send_json` on each recipient OUTSIDE the lock. Holding
+           the lock across a network await turns one slow or hung client
+           into a system-wide stall on every other manager operation
+           (other broadcasts, connects, disconnects, the sweep tick).
+        3. Re-acquire the lock to prune any sockets whose send raised,
+           keyed by identity so equality quirks on a WebSocket subclass
+           cannot drop the wrong entry.
 
         Filtering is done by `message["type"]`. Connections whose role does
         not include this message type are silently skipped.
@@ -105,18 +157,24 @@ class ConnectionManager:
             return
 
         message_type = message.get("type")
-        disconnected: list[WebSocket] = []
         async with self._lock:
-            for conn in self._connections:
-                if not _is_allowed(conn.role, message_type):
-                    continue
-                try:
-                    await conn.websocket.send_json(message)
-                except Exception:
-                    disconnected.append(conn.websocket)
+            recipients: list[_Connection] = [
+                c for c in self._connections if _is_allowed(c.role, message_type)
+            ]
 
-        for ws in disconnected:
-            await self.disconnect(ws)
+        if not recipients:
+            return
+
+        disconnected: list[WebSocket] = []
+        for conn in recipients:
+            try:
+                async with conn.send_lock:
+                    await conn.websocket.send_json(message)
+            except Exception:
+                disconnected.append(conn.websocket)
+
+        if disconnected:
+            await self._drop_websockets(disconnected)
 
     @property
     def connection_count(self) -> int:
@@ -264,11 +322,7 @@ async def _revalidate_once(manager: ConnectionManager) -> None:
     if not victims:
         return
 
-    victim_ids = {id(ws) for ws in victims}
-    async with manager._lock:
-        manager._connections = [
-            c for c in manager._connections if id(c.websocket) not in victim_ids
-        ]
+    await manager._drop_websockets(victims)
 
     for ws in victims:
         try:
