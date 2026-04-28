@@ -21,9 +21,9 @@ Mid-flight invalid tokens (expired, tampered, or signed with a stale secret) get
 
 A free function `revalidate_loop` lives in `backend/app/websocket.py`. The lifespan handler in `backend/app/main.py` starts one task with `asyncio.create_task(revalidate_loop(ws_manager))` and cancels it on shutdown.
 
-Each tick takes a snapshot of `(websocket, token)` pairs under the manager's lock, runs `decode_token` on each entry outside the lock, builds a kill list, then closes and disconnects victims.
+Each tick takes a snapshot of `(websocket, token)` pairs under the manager's lock, runs `decode_token` on each entry outside the lock, re-acquires the lock to remove victims from `_connections`, then closes and disconnects them outside the lock.
 
-```
+```text
 +-------------------+      every 60s      +------------------+
 | revalidate_loop   | ------------------> | _revalidate_once |
 +-------------------+                     +------------------+
@@ -35,6 +35,7 @@ Each tick takes a snapshot of `(websocket, token)` pairs under the manager's loc
                                        | lock; build victims  |
                                        +----------------------+
                                                   |
+                       remove victims under lock  |
                                                   v
                                        +----------------------+
                                        | for v in victims:    |
@@ -42,6 +43,8 @@ Each tick takes a snapshot of `(websocket, token)` pairs under the manager's loc
                                        |   manager.disconnect |
                                        +----------------------+
 ```
+
+Removing victims from `_connections` *before* awaiting `ws.close()` is what blocks the broadcast/close race: Starlette WebSockets are not safe for concurrent send + close on the same connection, so a `broadcast()` that holds the lock and iterates `_connections` must not be able to find a doomed socket while we are closing it.
 
 ## State Changes
 
@@ -107,6 +110,15 @@ async def _revalidate_once(manager: ConnectionManager) -> None:
         except HTTPException:
             victims.append(ws)
 
+    if not victims:
+        return
+
+    victim_ids = {id(ws) for ws in victims}
+    async with manager._lock:
+        manager._connections = [
+            c for c in manager._connections if id(c.websocket) not in victim_ids
+        ]
+
     for ws in victims:
         try:
             await ws.close(code=_EXPIRED_CLOSE_CODE)
@@ -117,10 +129,10 @@ async def _revalidate_once(manager: ConnectionManager) -> None:
 
 ### Why this shape
 
-- **Snapshot under lock, decode and I/O outside.** Decode is microseconds (HS256), but `await ws.close()` is real network I/O. Holding the lock across that would block every concurrent `broadcast`, `connect`, and `disconnect`. The victim list is by-identity, and `manager.disconnect` already filters by identity (`is`), so a connection that disappeared between snapshot and close becomes a no-op.
+- **Snapshot under lock, decode outside, remove under lock, close outside.** Decode is microseconds (HS256) and `await ws.close()` is real network I/O. Holding the lock across the close would block every concurrent `broadcast`, `connect`, and `disconnect`. But we cannot leave victims in `_connections` while close is in flight either, because Starlette WebSockets are not safe for concurrent send + close on the same connection. Removing under the lock between decode and close gives us both: short locked sections, and no overlap between an in-flight broadcast and the close.
 - **Catch-all in the outer loop.** A single decode bug or logger glitch must not silently kill the background task and leave the system without revalidation. `CancelledError` is re-raised so shutdown still works.
 - **`_revalidate_once` is callable directly from unit tests.** No need to drive `sleep`.
-- **Tolerates already-closed sockets.** If a peer disconnects between snapshot and close, `ws.close()` raises; the swallow continues to `manager.disconnect`, which is idempotent.
+- **Tolerates already-closed sockets.** If a peer disconnects between snapshot and close, `ws.close()` raises; the swallow continues to `manager.disconnect`, which is idempotent (the victim is already out of `_connections`).
 
 ### Lifespan wiring
 
@@ -153,18 +165,19 @@ class _FakeWS:
     async def close(self, code: int): self.closed_with = code
 ```
 
-1. **Expired token closes and removes.** Mint two real JWTs via `jwt.encode`: one fresh (`exp = now + 3600`), one expired (`exp = now - 60`). Wire both into `manager._connections` directly. Call `_revalidate_once(manager)`. Assert the expired fake's `closed_with == 4001`, the fresh fake is untouched, and `manager.connection_count() == 1`.
+1. **Expired token closes and removes.** Mint two real JWTs via `jwt.encode`: one fresh (`exp = now + 3600`), one expired (`exp = now - 60`). Wire both into `manager._connections` directly. Call `_revalidate_once(manager)`. Assert the expired fake's `closed_with == 4001`, the fresh fake is untouched, and `manager.connection_count == 1`.
 2. **Tampered token closes.** Mint a token, mutate a byte of the signature, install. Assert closed.
 3. **Fresh, valid role left alone.** Sanity check that valid sessions survive a sweep.
-4. **Snapshot-then-close race is safe.** Pre-seed one expired connection, monkeypatch `ws.close` to clear `manager._connections` before raising. Assert no exception escapes, `manager.disconnect` is still called and is a no-op.
-5. **Outer-loop catch-all keeps the task alive.** Inject a `_revalidate_once` that raises on the first call and succeeds on the second. Drive `revalidate_loop` with a fake `sleep` that yields twice and then raises `CancelledError`. Assert both calls fired and the loop did not die before cancellation.
+4. **Already-closed socket does not break the sweep.** Pre-seed one expired connection, monkeypatch `ws.close` to raise (peer hung up). Spy on `manager.disconnect`. Assert no exception escapes and the spy was called with the websocket. Without the spy the test would pass even if the sweep silently skipped `disconnect` after a close failure, since the victim is already removed from `_connections` under the lock.
+5. **Victim is unregistered before `close()` runs.** Pre-seed one expired connection, monkeypatch `ws.close` to inspect `manager._connections` under the lock during its body. Assert the connection was already gone at that point. This locks in the broadcast/close race fix.
+6. **Outer-loop catch-all keeps the task alive.** Inject a `_revalidate_once` that raises on the first call and succeeds on the second. Drive `revalidate_loop` with a fake `sleep` that yields twice and then raises `CancelledError`. Assert both calls fired and the loop did not die before cancellation.
 
 ### Integration (`backend/tests/integration/test_websocket_revalidation.py`)
 
-Reuses the in-process uvicorn fixture from `tests/integration/conftest.py` (PR #19).
+Reuses the in-process uvicorn fixture pattern from `tests/integration/test_websocket_roles.py` (PR #19); like that test, the fixture sets `lifespan="off"` so it exercises `revalidate_loop` directly without booting Redis/InfluxDB/scheduler. The lifespan wiring itself is short and audited at review time.
 
-6. **Mid-flight expiry.** Mint a token with `exp = now + 2`. Connect via `websockets.connect()`. Start `revalidate_loop(ws_manager, interval=0.5)` on the test loop. Wait up to 5 seconds for the close frame. Assert the close code is 4001 (`ConnectionClosedError.code`); if the `websockets` library surfaces 1006 instead, pin to that and add a comment about the empirical behavior.
-7. **Fresh token survives a sweep.** Same setup, `exp = now + 3600`. Run two `_revalidate_once` ticks. Assert the connection is still alive and can still receive a `manager.broadcast`.
+7. **Mid-flight expiry.** Mint a token with `exp = now + 2`. Connect via `websockets.connect()`. Start `revalidate_loop(ws_manager, interval=0.5)` on the test loop. Wait up to 5 seconds for the close frame. Assert the close code is 4001 (`ConnectionClosedError.code`); if the `websockets` library surfaces 1006 instead, pin to that and add a comment about the empirical behavior.
+8. **Fresh token survives two real sweeps.** Same setup, `exp = now + 3600`. Instrument `_revalidate_once` so the test can wait until at least two ticks have actually fired before asserting; without the counter the test would also pass against a dead loop. Then assert the connection is still alive and still receives a `manager.broadcast`.
 
 ### No fakeredis dependency
 
@@ -173,6 +186,7 @@ WebSocket revalidation does not touch Redis. The existing `wired_redis_cache` fi
 ## Risks and Mitigations
 
 - **Race: socket disconnects between snapshot and close.** `ws.close()` raises; swallowed. `manager.disconnect` is identity-filtered and idempotent.
+- **Race: concurrent `broadcast()` sees a doomed socket while we are closing it.** Victims are removed from `_connections` under the lock before close awaits, so a broadcast iterating under the lock cannot find them.
 - **Background task dies silently.** Outer-loop catch-all logs and continues. `CancelledError` re-raised so shutdown is clean.
 - **Stale secret rotation does not catch existing sockets.** That is exactly the gap this design closes; `decode_token` will raise on signature mismatch under the new secret, the loop closes the socket on the next tick.
 - **60-second worst-case slop.** With 8-hour sessions that is 0.2% of session lifetime. No config knob added; if anyone needs tuning, plumb it then.
