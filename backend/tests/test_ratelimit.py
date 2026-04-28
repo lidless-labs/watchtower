@@ -11,6 +11,7 @@ Covers:
 from __future__ import annotations
 
 import asyncio
+import time
 
 
 async def test_sliding_window_allows_under_limit(wired_redis_cache):
@@ -63,22 +64,34 @@ async def test_claim_cooldown_zero_seconds_is_no_op(wired_redis_cache):
 
 
 async def test_claim_cooldown_rereads_current_config(wired_redis_cache):
-    """Lowering cooldown_minutes between calls must take effect immediately.
+    """The Lua must compare stored ts against the *current* cooldown_seconds.
 
-    The Lua compares the stored timestamp against the *current* cooldown_seconds
-    argument, not whatever cooldown was in effect at write time. After a long
-    sleep equivalent to lowering the config, the second claim should succeed.
+    We exercise the Lua path (not the Python early-return for cooldown<=0) by
+    claiming with a positive cooldown, then directly aging the stored ts via
+    SET so it appears 100s old, then issuing a claim with cooldown=10. The Lua
+    must see (now - stored) > cooldown_seconds and grant the new claim. This
+    catches regressions where cooldown is treated as the write-time value
+    rather than the call-time value.
     """
     from app.ratelimit import claim_cooldown
 
-    # First claim with a 60s cooldown.
-    first = await claim_cooldown("test:cd:reread", cooldown_seconds=60)
+    key = "test:cd:reread"
+
+    first = await claim_cooldown(key, cooldown_seconds=60)
     assert first
 
-    # Caller now lowers cooldown_minutes to 0 (e.g. NOC operator dialing back).
-    # Even though < 60s elapsed, the new cooldown_seconds=0 means no lock.
-    second = await claim_cooldown("test:cd:reread", cooldown_seconds=0)
-    assert second, "lowering cooldown to 0 should release the gate immediately"
+    # Age the stored timestamp to 100s in the past via the underlying client,
+    # bypassing the Python wrapper so the Lua sees a real prior claim.
+    aged_ts = f"{time.time() - 100:.6f}"
+    await wired_redis_cache.set(key, aged_ts, ex=3600)
+
+    # New claim with a 10s cooldown must succeed because (now - aged_ts) = 100 > 10.
+    second = await claim_cooldown(key, cooldown_seconds=10)
+    assert second, "Lua must re-evaluate cooldown_seconds against the stored ts"
+
+    # And a fresh claim within the new 10s window is immediately blocked.
+    third = await claim_cooldown(key, cooldown_seconds=10)
+    assert third is None, "fresh claim must be locked out by the newly written ts"
 
 
 async def test_release_cooldown_with_correct_token_clears_lock(wired_redis_cache):
