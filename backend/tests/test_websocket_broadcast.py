@@ -25,7 +25,7 @@ import pytest
 from starlette.websockets import WebSocketState
 
 from app.auth import UserRole
-from app.websocket import ConnectionManager, _Connection
+from app.websocket import ConnectionManager, _Connection, _revalidate_once
 
 
 class _FastFakeWS:
@@ -123,6 +123,107 @@ async def test_broadcast_does_not_hold_lock_across_send_json():
     finally:
         blocking.release.set()
         await broadcast_task
+
+
+async def test_revalidation_close_serializes_with_in_flight_broadcast():
+    """`_revalidate_once` must not call `close()` while a broadcast is mid-send.
+
+    Pre-fix (this PR's first revision included), `_revalidate_once` called
+    `await ws.close()` without holding the per-connection `send_lock`. A
+    concurrent `broadcast()` snapshotted the same `_Connection`, took
+    `send_lock`, and entered `send_json`. The close frame and the in-flight
+    data frame then raced on the ASGI send channel. Removing the connection
+    from `_connections` does NOT close this race because the broadcast
+    snapshot already holds a live `_Connection` reference.
+
+    Setup: empty-string token => `decode_token` raises HTTPException =>
+    sweep marks this connection a victim. Block `send_json` mid-flight,
+    fire the real `_revalidate_once`, and assert `close()` does not run
+    until the broadcast releases `send_lock`.
+    """
+
+    class _BlockingFakeWSWithClose:
+        def __init__(self) -> None:
+            self.send_started = asyncio.Event()
+            self.release = asyncio.Event()
+            self.close_called_before_release = False
+            self.close_called = False
+
+        @property
+        def application_state(self) -> WebSocketState:
+            return WebSocketState.CONNECTED
+
+        async def send_json(self, message: dict[str, Any]) -> None:
+            self.send_started.set()
+            await self.release.wait()
+
+        async def close(self, code: int = 1000) -> None:
+            if not self.release.is_set():
+                self.close_called_before_release = True
+            self.close_called = True
+
+    manager = ConnectionManager()
+    ws = _BlockingFakeWSWithClose()
+    _attach(manager, ws, UserRole.ADMIN.value)
+
+    broadcast_task = asyncio.create_task(
+        manager.broadcast({"type": "device_status_change"})
+    )
+    sweep_task: asyncio.Task[None] | None = None
+    try:
+        await asyncio.wait_for(ws.send_started.wait(), timeout=1.0)
+
+        sweep_task = asyncio.create_task(_revalidate_once(manager))
+
+        # Give the sweep ample wall-clock time to traverse its
+        # snapshot/decode/drop phases and contend on `send_lock`. If the
+        # sweep bypassed the lock, close() would land here.
+        await asyncio.sleep(0.05)
+
+        assert not ws.close_called, (
+            "_revalidate_once closed the websocket while a broadcast was "
+            "mid-send_json on the same connection; close must serialize "
+            "via the per-connection send_lock"
+        )
+    finally:
+        ws.release.set()
+        await broadcast_task
+        if sweep_task is not None:
+            await sweep_task
+
+    assert ws.close_called, "sweep should have closed the expired connection"
+    assert not ws.close_called_before_release, (
+        "close() ran before send_json was released; per-connection "
+        "send_lock did not serialize close against the in-flight send"
+    )
+
+
+async def test_send_personal_skips_unmanaged_websocket():
+    """`send_personal` must not bypass `send_lock` for unmanaged sockets.
+
+    `_revalidate_once` drops a victim from `_connections` BEFORE acquiring
+    its `send_lock` to close it. If a `ping` arrives in that window,
+    `websocket_endpoint` calls `send_personal({"type": "pong"}, ws)`. A
+    pre-fix `send_personal` looked up the `_Connection`, saw `None`, and
+    fell back to a direct `await websocket.send_json(...)` with no
+    `send_lock`. That race-d the sweep's in-flight `close()` on the same
+    ASGI send channel.
+
+    The contract: when no `_Connection` is registered for the websocket,
+    `send_personal` must NOT send. The pong is dropped (the socket is
+    being closed anyway).
+    """
+    manager = ConnectionManager()
+    fake = _FastFakeWS()
+
+    # Never attached, mirroring a socket that's been removed from
+    # _connections by the revalidation sweep.
+    await manager.send_personal({"type": "pong"}, fake)
+
+    assert fake.received == [], (
+        "send_personal sent to an unmanaged websocket; this race-s the "
+        "revalidation sweep's close() because the send bypasses send_lock"
+    )
 
 
 async def test_concurrent_broadcast_delivers_to_free_recipients():

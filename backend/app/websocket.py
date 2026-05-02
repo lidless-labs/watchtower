@@ -115,23 +115,29 @@ class ConnectionManager:
     async def send_personal(self, message: dict[str, Any], websocket: WebSocket) -> None:
         """Send a message to a specific client, bypassing role filtering.
 
-        Routes through the registered `_Connection.send_lock` when one exists
-        so a personal send (e.g. the connect-time greeting or a `pong`)
-        cannot interleave frames with a concurrent broadcast on the same
-        websocket. Falls back to a direct send for unmanaged sockets so
-        callers that want to push to a not-yet-registered connection still
-        work.
+        Routes through the registered `_Connection.send_lock` so a personal
+        send (e.g. the connect-time greeting or a `pong`) cannot interleave
+        frames with a concurrent broadcast or a revalidation `close()` on
+        the same websocket.
+
+        If the websocket is not currently registered with the manager
+        (e.g. the revalidation sweep already dropped it from
+        `_connections` and is about to close it under its `send_lock`),
+        the send is skipped. Falling back to a direct `send_json` would
+        race the in-flight close on the same ASGI send channel; the
+        upcoming close will surface to the receive loop as
+        `WebSocketDisconnect` and the next round of cleanup will handle
+        it.
         """
         async with self._lock:
             conn = next(
                 (c for c in self._connections if c.websocket is websocket),
                 None,
             )
+        if conn is None:
+            return
         try:
-            if conn is not None:
-                async with conn.send_lock:
-                    await websocket.send_json(message)
-            else:
+            async with conn.send_lock:
                 await websocket.send_json(message)
         except Exception:
             await self.disconnect(websocket)
@@ -295,43 +301,47 @@ _EXPIRED_CLOSE_CODE = 4001
 async def _revalidate_once(manager: ConnectionManager) -> None:
     """Decode every live connection's stored token; close the ones that fail.
 
-    Three phases, two lock sections:
+    Four phases:
 
-    1. Snapshot `(websocket, token)` pairs under lock.
-    2. Decode each token outside the lock; build the victim list.
-    3. Re-acquire the lock and remove victims from `_connections` BEFORE
-       awaiting `ws.close()`. Removal under the lock is what prevents a
-       concurrent `broadcast()` from sending to a doomed socket while we
-       are closing it; Starlette WebSockets are not safe for concurrent
-       send + close on the same connection.
-    4. Close each victim outside the lock. `manager.disconnect` is then a
-       no-op (idempotent identity removal) but is still called so a
-       broken-connection branch in broadcast can also feed cleanup
-       through the same path.
+    1. Snapshot `_Connection` objects under `manager._lock`.
+    2. Decode each token outside the lock; build the victim list as
+       `_Connection` references (not bare WebSockets) so the close phase
+       can serialize with concurrent broadcasts via the per-connection
+       `send_lock`.
+    3. Drop victims from `_connections` so new broadcasts skip them.
+    4. For each victim, acquire `send_lock` BEFORE awaiting
+       `websocket.close()`. A close frame is a send-channel write; if it
+       races a broadcast's `send_json` on the same socket the ASGI send
+       channel can interleave frames. Removal from `_connections` does
+       NOT close this race on its own: a concurrent broadcast that
+       already snapshotted this `_Connection` still holds a live
+       reference and will take the same `send_lock` to send. Routing
+       close through `send_lock` is the actual serialization point.
     """
     async with manager._lock:
-        snapshot = [(c.websocket, c.token) for c in manager._connections]
+        snapshot = list(manager._connections)
 
-    victims: list[WebSocket] = []
-    for ws, token in snapshot:
+    victims: list[_Connection] = []
+    for conn in snapshot:
         try:
-            decode_token(token)
+            decode_token(conn.token)
         except HTTPException:
-            victims.append(ws)
+            victims.append(conn)
 
     if not victims:
         return
 
-    await manager._drop_websockets(victims)
+    await manager._drop_websockets([conn.websocket for conn in victims])
 
-    for ws in victims:
+    for conn in victims:
         try:
-            await ws.close(code=_EXPIRED_CLOSE_CODE)
+            async with conn.send_lock:
+                await conn.websocket.close(code=_EXPIRED_CLOSE_CODE)
         except Exception:
             # Already-closed sockets raise here; we still want any defensive
             # cleanup downstream to fire.
             pass
-        await manager.disconnect(ws)
+        await manager.disconnect(conn.websocket)
 
 
 async def revalidate_loop(
