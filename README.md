@@ -1,6 +1,21 @@
-# Watchtower
+<p align="center">
+  <img src="docs/assets/watchtower-banner.jpg" alt="Watchtower banner">
+</p>
 
-**Real-time NOC dashboard for network monitoring.**
+<h1 align="center">Watchtower</h1>
+
+<p align="center">
+  <strong>Real-time NOC dashboard for network monitoring.</strong>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/React-18-61DAFB?style=for-the-badge&logo=react&logoColor=white" alt="React 18" />
+  <img src="https://img.shields.io/badge/TypeScript-5-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript 5" />
+  <img src="https://img.shields.io/badge/FastAPI-Python_3.12%2B-009688?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI on Python 3.12+" />
+  <img src="https://img.shields.io/badge/WebSockets-live_updates-7C3AED?style=for-the-badge" alt="WebSockets live updates" />
+  <img src="https://img.shields.io/badge/Proxmox-LibreNMS-1F2937?style=for-the-badge" alt="Proxmox and LibreNMS" />
+  <img src="https://img.shields.io/badge/license-MIT-2EA043?style=for-the-badge" alt="MIT license" />
+</p>
 
 A modern Network Operations Center dashboard that monitors network devices, interfaces, VMs, and alerts through LibreNMS, Proxmox, and other integrations. WebSocket-driven live updates keep metrics current without page refreshes.
 
