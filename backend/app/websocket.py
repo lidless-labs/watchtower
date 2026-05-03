@@ -338,10 +338,10 @@ async def _revalidate_once(manager: ConnectionManager) -> None:
             async with conn.send_lock:
                 await conn.websocket.close(code=_EXPIRED_CLOSE_CODE)
         except Exception:
-            # Already-closed sockets raise here; we still want any defensive
-            # cleanup downstream to fire.
+            # Already-closed sockets raise here; nothing left to clean up
+            # because `_drop_websockets` above already removed every victim
+            # from `_connections`.
             pass
-        await manager.disconnect(conn.websocket)
 
 
 async def revalidate_loop(
