@@ -138,7 +138,17 @@ class ConnectionManager:
             return
         try:
             async with conn.send_lock:
-                await websocket.send_json(message)
+                # Recheck membership: the revalidation sweep can drop this
+                # `_Connection` between releasing `self._lock` above and
+                # acquiring `send_lock` here, in which case the socket is
+                # either already closed or about to be. `send_lock` alone
+                # serializes against frame interleaving but does not stop
+                # us from emitting one final pong/greeting to a doomed
+                # peer; the explicit recheck does.
+                async with self._lock:
+                    if not any(c is conn for c in self._connections):
+                        return
+                await conn.websocket.send_json(message)
         except Exception:
             await self.disconnect(websocket)
 

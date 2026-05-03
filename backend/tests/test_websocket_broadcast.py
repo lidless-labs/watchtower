@@ -198,6 +198,50 @@ async def test_revalidation_close_serializes_with_in_flight_broadcast():
     )
 
 
+async def test_send_personal_rechecks_membership_under_send_lock():
+    """`send_personal` must recheck `_connections` after acquiring `send_lock`.
+
+    The race: `send_personal` looks up the `_Connection` under
+    `manager._lock`, releases the lock, and then awaits `send_lock`. The
+    revalidation sweep can drop this connection from `_connections`
+    in that window. Without the in-`send_lock` recheck, `send_personal`
+    proceeds to send one final pong/greeting to a connection that the
+    sweep is about to (or already did) close.
+
+    Setup pre-acquires `send_lock` so the test can deterministically
+    interleave: start `send_personal`, let it block on `send_lock`,
+    drop the connection from `_connections`, release the lock, and
+    assert no send happened.
+    """
+    manager = ConnectionManager()
+    fake = _FastFakeWS()
+    _attach(manager, fake, UserRole.ADMIN.value)
+    conn = manager._connections[0]
+
+    await conn.send_lock.acquire()
+
+    send_personal_task = asyncio.create_task(
+        manager.send_personal({"type": "pong"}, fake)
+    )
+
+    # Let send_personal run far enough to block on send_lock.
+    for _ in range(5):
+        await asyncio.sleep(0)
+
+    # Simulate the revalidation sweep dropping the connection between
+    # send_personal's lookup and its send_lock acquisition.
+    await manager._drop_websockets([fake])
+
+    conn.send_lock.release()
+    await send_personal_task
+
+    assert fake.received == [], (
+        "send_personal sent to a connection that was dropped between "
+        "lookup and send_lock acquisition; the in-send_lock membership "
+        "recheck should have caught this"
+    )
+
+
 async def test_send_personal_skips_unmanaged_websocket():
     """`send_personal` must not bypass `send_lock` for unmanaged sockets.
 
