@@ -124,35 +124,31 @@ async def test_fresh_valid_session_survives_sweep():
 async def test_already_closed_socket_does_not_break_sweep():
     """A peer that hangs up between snapshot and close does not derail cleanup.
 
-    We monkeypatch `ws.close` to raise (Starlette raises on close-after-close)
-    and spy on `manager.disconnect` to prove that the swallow path still
-    feeds the connection through the disconnect channel. Without the spy the
-    test would pass even if the sweep silently skipped `disconnect` after a
-    close failure, because by that point `_revalidate_once` has already
-    removed the victim from `_connections` under the lock.
+    Monkeypatch `ws.close` to raise (Starlette raises on close-after-close)
+    and assert the sweep swallows it, leaves no connection behind, and
+    finishes without propagating the exception. `_drop_websockets` runs
+    before the close loop so victim removal is independent of whether
+    `close()` succeeds.
     """
     manager = ConnectionManager()
     ws = _FakeWS()
     _attach(manager, ws, UserRole.VIEWER.value, _mint(UserRole.VIEWER.value, exp_offset_seconds=-60))
 
+    close_calls: list[int] = []
+
     async def raising_close(code: int) -> None:
+        close_calls.append(code)
         raise RuntimeError("peer already closed")
 
     ws.close = raising_close  # type: ignore[assignment]
 
-    disconnect_calls: list[Any] = []
-    original_disconnect = manager.disconnect
-
-    async def spy_disconnect(target: Any) -> None:
-        disconnect_calls.append(target)
-        await original_disconnect(target)
-
-    manager.disconnect = spy_disconnect  # type: ignore[assignment]
-
     # Must not raise even though `close` does.
     await _revalidate_once(manager)
 
-    assert disconnect_calls == [ws], "disconnect must still run after close raises"
+    assert close_calls == [_EXPIRED_CLOSE_CODE], (
+        "sweep must still attempt close() even though _drop_websockets has "
+        "already removed the victim from _connections"
+    )
     assert manager.connection_count == 0
 
 

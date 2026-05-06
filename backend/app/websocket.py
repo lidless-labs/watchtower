@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
 from fastapi import HTTPException, WebSocket, WebSocketDisconnect
@@ -60,6 +60,13 @@ class _Connection:
     websocket: WebSocket
     role: str
     token: str
+    # Starlette/ASGI WebSockets are not safe for concurrent `send_json` on
+    # the same connection: two coroutines writing to the underlying ASGI
+    # send channel can interleave frame data. Every send call site
+    # (broadcast, send_personal, anything else added later) must take this
+    # lock around `await websocket.send_json(...)` to serialize sends per
+    # connection while leaving cross-connection sends free to overlap.
+    send_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
 class ConnectionManager:
@@ -85,18 +92,92 @@ class ConnectionManager:
 
     async def disconnect(self, websocket: WebSocket) -> None:
         """Remove a WebSocket connection."""
+        await self._drop_websockets([websocket])
+
+    async def _drop_websockets(self, websockets: list[WebSocket]) -> None:
+        """Remove the given websockets from `_connections` by identity.
+
+        Shared cleanup for `broadcast`, `disconnect`, and `_revalidate_once`.
+        Identity (`id()`) keying matters: a Starlette WebSocket subclass or
+        a fake in tests could compare equal to a different instance, and
+        equality-based removal would silently drop the wrong connection.
+        Acquiring the lock once for a batch is also cheaper than per-call
+        churn when broadcast surfaces multiple dead peers in one pass.
+        """
+        if not websockets:
+            return
+        target_ids = {id(ws) for ws in websockets}
         async with self._lock:
-            self._connections = [c for c in self._connections if c.websocket is not websocket]
+            self._connections = [
+                c for c in self._connections if id(c.websocket) not in target_ids
+            ]
 
     async def send_personal(self, message: dict[str, Any], websocket: WebSocket) -> None:
-        """Send a message to a specific client, bypassing role filtering."""
+        """Send a message to a specific client, bypassing role filtering.
+
+        Routes through the registered `_Connection.send_lock` so a personal
+        send (e.g. the connect-time greeting or a `pong`) cannot interleave
+        frames with a concurrent broadcast or a revalidation `close()` on
+        the same websocket.
+
+        If the websocket is not currently registered with the manager
+        (e.g. the revalidation sweep already dropped it from
+        `_connections` and is about to close it under its `send_lock`),
+        the send is skipped. Falling back to a direct `send_json` would
+        race the in-flight close on the same ASGI send channel; the
+        upcoming close will surface to the receive loop as
+        `WebSocketDisconnect` and the next round of cleanup will handle
+        it.
+        """
+        # Validate serialization before entering the transport-protected
+        # block so a non-serializable payload (TypeError from json.dumps)
+        # surfaces as a caller bug. Catching it below as part of `send_json`
+        # would be misclassified as a peer drop and unregister a healthy
+        # socket.
+        json.dumps(message, separators=(",", ":"), ensure_ascii=False)
+
+        async with self._lock:
+            conn = next(
+                (c for c in self._connections if c.websocket is websocket),
+                None,
+            )
+        if conn is None:
+            return
         try:
-            await websocket.send_json(message)
-        except Exception:
+            async with conn.send_lock:
+                # Recheck membership: the revalidation sweep can drop this
+                # `_Connection` between releasing `self._lock` above and
+                # acquiring `send_lock` here, in which case the socket is
+                # either already closed or about to be. `send_lock` alone
+                # serializes against frame interleaving but does not stop
+                # us from emitting one final pong/greeting to a doomed
+                # peer; the explicit recheck does.
+                async with self._lock:
+                    if not any(c is conn for c in self._connections):
+                        return
+                await conn.websocket.send_json(message)
+        except (RuntimeError, WebSocketDisconnect):
+            # Starlette signals a closed/disconnected peer with these two:
+            # `RuntimeError` after the server side has already sent close,
+            # `WebSocketDisconnect` after the client tore down. Anything
+            # else (e.g. a TypeError from a stray non-serializable field
+            # slipping past the upfront validate) must propagate so we do
+            # not silently disconnect a healthy socket on a server bug.
             await self.disconnect(websocket)
 
     async def broadcast(self, message: dict[str, Any]) -> None:
         """Broadcast a message to all connected clients whose role allows it.
+
+        Three phases, lock policy mirrors `_revalidate_once`:
+
+        1. Snapshot the recipient list under the lock.
+        2. Await `send_json` on each recipient OUTSIDE the lock. Holding
+           the lock across a network await turns one slow or hung client
+           into a system-wide stall on every other manager operation
+           (other broadcasts, connects, disconnects, the sweep tick).
+        3. Re-acquire the lock to prune any sockets whose send raised,
+           keyed by identity so equality quirks on a WebSocket subclass
+           cannot drop the wrong entry.
 
         Filtering is done by `message["type"]`. Connections whose role does
         not include this message type are silently skipped.
@@ -104,19 +185,44 @@ class ConnectionManager:
         if not self._connections:
             return
 
-        message_type = message.get("type")
-        disconnected: list[WebSocket] = []
-        async with self._lock:
-            for conn in self._connections:
-                if not _is_allowed(conn.role, message_type):
-                    continue
-                try:
-                    await conn.websocket.send_json(message)
-                except Exception:
-                    disconnected.append(conn.websocket)
+        # Validate serialization before entering the transport-protected
+        # loop. A non-serializable payload (TypeError from json.dumps) is
+        # a server-side bug; catching it per recipient below would prune
+        # every healthy connection on the broadcast as if each were a
+        # peer drop.
+        json.dumps(message, separators=(",", ":"), ensure_ascii=False)
 
-        for ws in disconnected:
-            await self.disconnect(ws)
+        message_type = message.get("type")
+        async with self._lock:
+            recipients: list[_Connection] = [
+                c for c in self._connections if _is_allowed(c.role, message_type)
+            ]
+
+        if not recipients:
+            return
+
+        disconnected: list[WebSocket] = []
+        for conn in recipients:
+            try:
+                async with conn.send_lock:
+                    # Recheck membership: the revalidation sweep can drop
+                    # this `_Connection` between the recipient snapshot
+                    # above and acquiring `send_lock` here. Without this
+                    # recheck, broadcast still delivers one final message
+                    # to a connection whose token has just been
+                    # invalidated, which is a post-expiry auth leak (not
+                    # merely sloppy cleanup). Mirrors `send_personal`.
+                    async with self._lock:
+                        if not any(c is conn for c in self._connections):
+                            continue
+                    await conn.websocket.send_json(message)
+            except (RuntimeError, WebSocketDisconnect):
+                # Closed/disconnected peer. See send_personal for why these
+                # two and not a blanket Exception.
+                disconnected.append(conn.websocket)
+
+        if disconnected:
+            await self._drop_websockets(disconnected)
 
     @property
     def connection_count(self) -> int:
@@ -237,47 +343,47 @@ _EXPIRED_CLOSE_CODE = 4001
 async def _revalidate_once(manager: ConnectionManager) -> None:
     """Decode every live connection's stored token; close the ones that fail.
 
-    Three phases, two lock sections:
+    Four phases:
 
-    1. Snapshot `(websocket, token)` pairs under lock.
-    2. Decode each token outside the lock; build the victim list.
-    3. Re-acquire the lock and remove victims from `_connections` BEFORE
-       awaiting `ws.close()`. Removal under the lock is what prevents a
-       concurrent `broadcast()` from sending to a doomed socket while we
-       are closing it; Starlette WebSockets are not safe for concurrent
-       send + close on the same connection.
-    4. Close each victim outside the lock. `manager.disconnect` is then a
-       no-op (idempotent identity removal) but is still called so a
-       broken-connection branch in broadcast can also feed cleanup
-       through the same path.
+    1. Snapshot `_Connection` objects under `manager._lock`.
+    2. Decode each token outside the lock; build the victim list as
+       `_Connection` references (not bare WebSockets) so the close phase
+       can serialize with concurrent broadcasts via the per-connection
+       `send_lock`.
+    3. Drop victims from `_connections` so new broadcasts skip them.
+    4. For each victim, acquire `send_lock` BEFORE awaiting
+       `websocket.close()`. A close frame is a send-channel write; if it
+       races a broadcast's `send_json` on the same socket the ASGI send
+       channel can interleave frames. Removal from `_connections` does
+       NOT close this race on its own: a concurrent broadcast that
+       already snapshotted this `_Connection` still holds a live
+       reference and will take the same `send_lock` to send. Routing
+       close through `send_lock` is the actual serialization point.
     """
     async with manager._lock:
-        snapshot = [(c.websocket, c.token) for c in manager._connections]
+        snapshot = list(manager._connections)
 
-    victims: list[WebSocket] = []
-    for ws, token in snapshot:
+    victims: list[_Connection] = []
+    for conn in snapshot:
         try:
-            decode_token(token)
+            decode_token(conn.token)
         except HTTPException:
-            victims.append(ws)
+            victims.append(conn)
 
     if not victims:
         return
 
-    victim_ids = {id(ws) for ws in victims}
-    async with manager._lock:
-        manager._connections = [
-            c for c in manager._connections if id(c.websocket) not in victim_ids
-        ]
+    await manager._drop_websockets([conn.websocket for conn in victims])
 
-    for ws in victims:
+    for conn in victims:
         try:
-            await ws.close(code=_EXPIRED_CLOSE_CODE)
+            async with conn.send_lock:
+                await conn.websocket.close(code=_EXPIRED_CLOSE_CODE)
         except Exception:
-            # Already-closed sockets raise here; we still want any defensive
-            # cleanup downstream to fire.
+            # Already-closed sockets raise here; nothing left to clean up
+            # because `_drop_websockets` above already removed every victim
+            # from `_connections`.
             pass
-        await manager.disconnect(ws)
 
 
 async def revalidate_loop(
