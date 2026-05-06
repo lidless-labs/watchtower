@@ -129,6 +129,13 @@ class ConnectionManager:
         `WebSocketDisconnect` and the next round of cleanup will handle
         it.
         """
+        # Validate serialization before entering the transport-protected
+        # block so a non-serializable payload (TypeError from json.dumps)
+        # surfaces as a caller bug. Catching it below as part of `send_json`
+        # would be misclassified as a peer drop and unregister a healthy
+        # socket.
+        json.dumps(message, separators=(",", ":"), ensure_ascii=False)
+
         async with self._lock:
             conn = next(
                 (c for c in self._connections if c.websocket is websocket),
@@ -149,7 +156,13 @@ class ConnectionManager:
                     if not any(c is conn for c in self._connections):
                         return
                 await conn.websocket.send_json(message)
-        except Exception:
+        except (RuntimeError, WebSocketDisconnect):
+            # Starlette signals a closed/disconnected peer with these two:
+            # `RuntimeError` after the server side has already sent close,
+            # `WebSocketDisconnect` after the client tore down. Anything
+            # else (e.g. a TypeError from a stray non-serializable field
+            # slipping past the upfront validate) must propagate so we do
+            # not silently disconnect a healthy socket on a server bug.
             await self.disconnect(websocket)
 
     async def broadcast(self, message: dict[str, Any]) -> None:
@@ -171,6 +184,13 @@ class ConnectionManager:
         """
         if not self._connections:
             return
+
+        # Validate serialization before entering the transport-protected
+        # loop. A non-serializable payload (TypeError from json.dumps) is
+        # a server-side bug; catching it per recipient below would prune
+        # every healthy connection on the broadcast as if each were a
+        # peer drop.
+        json.dumps(message, separators=(",", ":"), ensure_ascii=False)
 
         message_type = message.get("type")
         async with self._lock:
@@ -196,7 +216,9 @@ class ConnectionManager:
                         if not any(c is conn for c in self._connections):
                             continue
                     await conn.websocket.send_json(message)
-            except Exception:
+            except (RuntimeError, WebSocketDisconnect):
+                # Closed/disconnected peer. See send_personal for why these
+                # two and not a blanket Exception.
                 disconnected.append(conn.websocket)
 
         if disconnected:

@@ -78,6 +78,45 @@ class _RaisingFakeWS:
         raise RuntimeError("simulated peer drop mid-send")
 
 
+class _ProbingLock:
+    """`asyncio.Lock` that flips `acquire_blocked` when a coroutine waits.
+
+    The recheck race tests need to know the racing coroutine has actually
+    parked on `conn.send_lock` before we drop the connection. Yielding
+    the loop a fixed number of times via `await asyncio.sleep(0)` is a
+    hope, not a proof: if `_drop_websockets` runs before the racing
+    coroutine reaches `send_lock`, the recipient snapshot inside
+    `broadcast` was never taken (or `send_personal`'s lookup never ran),
+    and the test passes without exercising the recheck path at all.
+
+    Ducktypes the surface that `async with conn.send_lock:` and a manual
+    pre-acquire from a test need: `acquire`, `release`, `locked`, and
+    the async context manager protocol.
+    """
+
+    def __init__(self) -> None:
+        self._inner = asyncio.Lock()
+        self.acquire_blocked = asyncio.Event()
+
+    async def acquire(self) -> bool:
+        if self._inner.locked():
+            self.acquire_blocked.set()
+        return await self._inner.acquire()
+
+    def release(self) -> None:
+        self._inner.release()
+
+    def locked(self) -> bool:
+        return self._inner.locked()
+
+    async def __aenter__(self) -> "_ProbingLock":
+        await self.acquire()
+        return self
+
+    async def __aexit__(self, *_exc: Any) -> None:
+        self.release()
+
+
 def _attach(manager: ConnectionManager, ws: Any, role: str) -> None:
     """Install a connection without going through the live `connect()` path.
 
@@ -218,6 +257,7 @@ async def test_broadcast_rechecks_membership_under_send_lock():
     fake = _FastFakeWS()
     _attach(manager, fake, UserRole.ADMIN.value)
     conn = manager._connections[0]
+    conn.send_lock = _ProbingLock()  # type: ignore[assignment]
 
     await conn.send_lock.acquire()
 
@@ -225,10 +265,11 @@ async def test_broadcast_rechecks_membership_under_send_lock():
         manager.broadcast({"type": "device_status_change", "id": 1})
     )
 
-    # Let broadcast run far enough to snapshot recipients and block on
-    # send_lock for our connection.
-    for _ in range(5):
-        await asyncio.sleep(0)
+    # Wait deterministically for broadcast to snapshot recipients and
+    # park on `send_lock`. Without this, `_drop_websockets` could fire
+    # before broadcast's snapshot and the test would pass without
+    # exercising the recheck path at all.
+    await asyncio.wait_for(conn.send_lock.acquire_blocked.wait(), timeout=1.0)
 
     # Simulate the revalidation sweep dropping the connection between
     # broadcast's recipient snapshot and its send_lock acquisition.
@@ -263,6 +304,7 @@ async def test_send_personal_rechecks_membership_under_send_lock():
     fake = _FastFakeWS()
     _attach(manager, fake, UserRole.ADMIN.value)
     conn = manager._connections[0]
+    conn.send_lock = _ProbingLock()  # type: ignore[assignment]
 
     await conn.send_lock.acquire()
 
@@ -270,9 +312,11 @@ async def test_send_personal_rechecks_membership_under_send_lock():
         manager.send_personal({"type": "pong"}, fake)
     )
 
-    # Let send_personal run far enough to block on send_lock.
-    for _ in range(5):
-        await asyncio.sleep(0)
+    # Wait deterministically for send_personal to park on `send_lock`.
+    # Without this, `_drop_websockets` could fire before send_personal's
+    # lookup completes and the test would pass without exercising the
+    # recheck path.
+    await asyncio.wait_for(conn.send_lock.acquire_blocked.wait(), timeout=1.0)
 
     # Simulate the revalidation sweep dropping the connection between
     # send_personal's lookup and its send_lock acquisition.
@@ -314,6 +358,54 @@ async def test_send_personal_skips_unmanaged_websocket():
         "send_personal sent to an unmanaged websocket; this race-s the "
         "revalidation sweep's close() because the send bypasses send_lock"
     )
+
+
+async def test_non_serializable_payload_does_not_disconnect_recipients():
+    """A non-serializable payload must surface as `TypeError`, not a peer drop.
+
+    Pre-fix `except Exception` around `send_json` conflated two unrelated
+    failure modes: Starlette's `json.dumps` raising `TypeError` on a
+    server-side payload bug (e.g. a stray `datetime` or custom object),
+    and Starlette's `RuntimeError` after the peer closed. The first must
+    propagate so the bug surfaces; the second is a legitimate disconnect
+    signal. Misclassifying the first would prune every healthy recipient
+    of the broadcast on a single bad call.
+
+    Pre-validating with `json.dumps` upfront makes `TypeError` raise
+    before any per-recipient lock or send is touched, so connection
+    state stays untouched on a payload bug.
+    """
+
+    class _NotSerializable:
+        pass
+
+    manager = ConnectionManager()
+    healthy = _FastFakeWS()
+    _attach(manager, healthy, UserRole.ADMIN.value)
+
+    bad_payload = {
+        "type": "device_status_change",
+        "blob": _NotSerializable(),
+    }
+
+    with pytest.raises(TypeError):
+        await manager.broadcast(bad_payload)
+
+    assert manager.connection_count == 1, (
+        "broadcast disconnected a healthy recipient on a payload bug; "
+        "TypeError from json.dumps must propagate, not be swallowed as "
+        "a peer drop"
+    )
+    assert manager.active_connections == [healthy]
+    assert healthy.received == []
+
+    with pytest.raises(TypeError):
+        await manager.send_personal(bad_payload, healthy)
+
+    assert manager.connection_count == 1, (
+        "send_personal disconnected a healthy socket on a payload bug"
+    )
+    assert healthy.received == []
 
 
 async def test_concurrent_broadcast_delivers_to_free_recipients():
