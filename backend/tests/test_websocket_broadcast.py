@@ -198,6 +198,52 @@ async def test_revalidation_close_serializes_with_in_flight_broadcast():
     )
 
 
+async def test_broadcast_rechecks_membership_under_send_lock():
+    """`broadcast` must recheck `_connections` after acquiring `send_lock`.
+
+    Symmetric to the `send_personal` recheck. `broadcast()` snapshots
+    recipients under `manager._lock`, releases the lock, and then awaits
+    `send_lock` per recipient. The revalidation sweep can drop a snapped
+    `_Connection` from `_connections` in that window. Without the
+    in-`send_lock` recheck, `broadcast` still calls `send_json` and
+    delivers one final post-expiry message to a connection whose JWT is
+    no longer valid - a real auth leak, not just a cleanup miss.
+
+    Setup pre-acquires the connection's `send_lock` so the test can
+    deterministically interleave: start `broadcast`, let it block on
+    `send_lock`, drop the connection from `_connections`, release the
+    lock, and assert no send happened.
+    """
+    manager = ConnectionManager()
+    fake = _FastFakeWS()
+    _attach(manager, fake, UserRole.ADMIN.value)
+    conn = manager._connections[0]
+
+    await conn.send_lock.acquire()
+
+    broadcast_task = asyncio.create_task(
+        manager.broadcast({"type": "device_status_change", "id": 1})
+    )
+
+    # Let broadcast run far enough to snapshot recipients and block on
+    # send_lock for our connection.
+    for _ in range(5):
+        await asyncio.sleep(0)
+
+    # Simulate the revalidation sweep dropping the connection between
+    # broadcast's recipient snapshot and its send_lock acquisition.
+    await manager._drop_websockets([fake])
+
+    conn.send_lock.release()
+    await broadcast_task
+
+    assert fake.received == [], (
+        "broadcast sent to a connection that was dropped between recipient "
+        "snapshot and send_lock acquisition; the in-send_lock membership "
+        "recheck should have caught this"
+    )
+
+
 async def test_send_personal_rechecks_membership_under_send_lock():
     """`send_personal` must recheck `_connections` after acquiring `send_lock`.
 

@@ -185,6 +185,16 @@ class ConnectionManager:
         for conn in recipients:
             try:
                 async with conn.send_lock:
+                    # Recheck membership: the revalidation sweep can drop
+                    # this `_Connection` between the recipient snapshot
+                    # above and acquiring `send_lock` here. Without this
+                    # recheck, broadcast still delivers one final message
+                    # to a connection whose token has just been
+                    # invalidated, which is a post-expiry auth leak (not
+                    # merely sloppy cleanup). Mirrors `send_personal`.
+                    async with self._lock:
+                        if not any(c is conn for c in self._connections):
+                            continue
                     await conn.websocket.send_json(message)
             except Exception:
                 disconnected.append(conn.websocket)
