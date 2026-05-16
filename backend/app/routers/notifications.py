@@ -1,8 +1,9 @@
 """Notification delivery API router."""
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from app.auth import require_admin
 from app.services.notification_service import notification_service
 from app.config import get_config
 
@@ -24,7 +25,7 @@ async def notification_stats():
     return notification_service.get_stats()
 
 
-@router.post("/test/{channel}")
+@router.post("/test/{channel}", dependencies=[Depends(require_admin)])
 async def test_channel(channel: str):
     if channel not in {"discord", "pushover", "email"}:
         raise HTTPException(status_code=400, detail=f"Unknown channel: {channel}")

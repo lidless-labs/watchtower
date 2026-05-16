@@ -134,15 +134,17 @@ async def test_login_rate_limit_kicks_in_after_threshold(client):
     )
 
 
-async def test_bootstrap_rate_limit_kicks_in(app):
+async def test_bootstrap_rate_limit_kicks_in(app, monkeypatch):
     """4 bootstrap attempts in <60s must hit the 3/60s bootstrap rate limit on the 4th.
 
     We re-clear admin_password_hash after every successful bootstrap so each
     iteration takes the bootstrap codepath and the rate-limit gate is the
-    actual thing under test. Localhost (127.0.0.1) is implicitly authorized
-    for bootstrap, so authorization isn't what would block us.
+    actual thing under test. dev_mode is required for localhost to count as
+    authorized post-CVE; this test is about the rate limit, not authz.
     """
     from app import config as config_module
+
+    monkeypatch.setattr(config_module.settings, "dev_mode", True)
 
     async with _make_client(app) as bc:
         # Each within-quota bootstrap call sets the password (200), so we
@@ -211,3 +213,67 @@ async def test_change_password_rejects_short_new_password(client):
     )
     # Pydantic Field(min_length=8) -> 422 on validation
     assert r.status_code == 422
+
+
+async def test_bootstrap_rejects_localhost_without_token_in_prod(app, monkeypatch):
+    """Localhost source IP must NOT auto-authorize bootstrap when dev_mode=False.
+
+    A same-host reverse proxy (nginx -> uvicorn on 127.0.0.1) makes every public
+    request look local from uvicorn's perspective. Trusting that as "this must
+    be the operator on the box" is an auth bypass: any internet user can hit
+    /auth/login through the proxy and run first-login if the admin password is
+    still unset. Production must require the env-token regardless of source.
+    """
+    from app import config as config_module
+
+    monkeypatch.setattr(config_module.settings, "dev_mode", False)
+    monkeypatch.delenv("WATCHTOWER_BOOTSTRAP_TOKEN", raising=False)
+    config_module.config.auth.admin_password_hash = ""
+
+    async with _make_client(app) as bc:
+        r = await bc.post(
+            "/api/auth/login",
+            json={"username": "admin", "password": "newAdminPw1"},
+        )
+    assert r.status_code == 403, (
+        f"localhost bootstrap in production must require a token, got "
+        f"{r.status_code} {r.text}"
+    )
+
+
+async def test_bootstrap_localhost_allowed_in_dev_mode(app, monkeypatch):
+    """In dev_mode, localhost without a token still works for first-login."""
+    from app import config as config_module
+
+    monkeypatch.setattr(config_module.settings, "dev_mode", True)
+    monkeypatch.delenv("WATCHTOWER_BOOTSTRAP_TOKEN", raising=False)
+    config_module.config.auth.admin_password_hash = ""
+
+    async with _make_client(app) as bc:
+        r = await bc.post(
+            "/api/auth/login",
+            json={"username": "admin", "password": "newAdminPw1"},
+        )
+    assert r.status_code == 200, (
+        f"dev-mode localhost bootstrap should succeed, got {r.status_code} {r.text}"
+    )
+
+
+async def test_bootstrap_token_works_in_prod(app, monkeypatch):
+    """A valid WATCHTOWER_BOOTSTRAP_TOKEN unblocks first-login from any source."""
+    from app import config as config_module
+
+    monkeypatch.setattr(config_module.settings, "dev_mode", False)
+    monkeypatch.setenv("WATCHTOWER_BOOTSTRAP_TOKEN", "production-secret-xyz")
+    config_module.config.auth.admin_password_hash = ""
+
+    async with _make_client(app) as bc:
+        r = await bc.post(
+            "/api/auth/login",
+            json={"username": "admin", "password": "newAdminPw1"},
+            headers={"X-Watchtower-Bootstrap-Token": "production-secret-xyz"},
+        )
+    assert r.status_code == 200, (
+        f"token-authorized prod bootstrap should succeed, got "
+        f"{r.status_code} {r.text}"
+    )

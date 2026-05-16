@@ -116,15 +116,19 @@ def _authorize_bootstrap(request: Request, client_ip: str) -> None:
     bootstrap_env_token = os.getenv("WATCHTOWER_BOOTSTRAP_TOKEN", "").strip()
     provided_token = _extract_bootstrap_token(request)
 
-    if _is_localhost(client_ip):
-        _log_bootstrap_attempt(client_ip, True, "localhost")
+    # Localhost-as-trusted only holds in dev_mode. Production typically runs
+    # uvicorn behind a same-host reverse proxy, which makes every public
+    # request look local from uvicorn's perspective. Treating that as the
+    # operator-on-the-box is an auth bypass.
+    if settings.dev_mode and _is_localhost(client_ip):
+        _log_bootstrap_attempt(client_ip, True, "localhost+dev_mode")
         return
 
     if bootstrap_env_token and provided_token == bootstrap_env_token:
         _log_bootstrap_attempt(client_ip, True, "valid bootstrap token")
         return
 
-    reason = "missing bootstrap token" if bootstrap_env_token else "non-local bootstrap denied"
+    reason = "missing bootstrap token" if bootstrap_env_token else "bootstrap requires WATCHTOWER_BOOTSTRAP_TOKEN in production"
     _log_bootstrap_attempt(client_ip, False, reason)
     raise HTTPException(status_code=403, detail="First-login bootstrap is restricted")
 
