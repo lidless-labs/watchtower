@@ -35,57 +35,42 @@ async def lifespan(app: FastAPI):
 
     # Startup
     await redis_cache.connect()
+    reload_config()
 
-    if settings.demo_mode:
-        # Demo mode: pre-populate cache with fake data and start simulator
-        from .demo_simulator import initialize_demo_cache, demo_simulator
-        from .history.demo_seeder import seed_demo_history
-        from .history.demo_store import demo_history_store
+    if config.auth.jwt_secret == "change-me-in-production":
+        generated = secrets.token_urlsafe(32)
+        try:
+            persist_config({"auth": {"jwt_secret": generated}})
+            logger.warning(
+                "JWT secret was the default placeholder; generated a "
+                "random one and persisted it to config.yaml."
+            )
+        except Exception as exc:
+            config.auth.jwt_secret = generated
+            logger.critical(
+                "JWT secret was the default placeholder; persist failed "
+                "(%s). Using random secret for THIS session only. Sessions "
+                "will NOT survive a restart until config.yaml is writable.",
+                exc,
+            )
 
-        await initialize_demo_cache()
-        seed_demo_history(demo_history_store)
-        asyncio.create_task(demo_simulator())
-        print("[DEMO] Demo mode active - using simulated data")
-    else:
-        # Production mode: start real polling scheduler if LibreNMS is configured
-        reload_config()
+    if config.influxdb.enabled or settings.influxdb_enabled:
+        if config.influxdb.url:
+            settings.influxdb_url = config.influxdb.url
+        if config.influxdb.token:
+            settings.influxdb_token = config.influxdb.token
+        if config.influxdb.org:
+            settings.influxdb_org = config.influxdb.org
+        if config.influxdb.bucket:
+            settings.influxdb_bucket = config.influxdb.bucket
+        settings.influxdb_enabled = True
 
-        # ── JWT secret safety check (after config reload) ────────────────
-        if config.auth.jwt_secret == "change-me-in-production":
-            generated = secrets.token_urlsafe(32)
-            try:
-                persist_config({"auth": {"jwt_secret": generated}})
-                logger.warning(
-                    "JWT secret was the default placeholder; generated a "
-                    "random one and persisted it to config.yaml."
-                )
-            except Exception as exc:
-                config.auth.jwt_secret = generated
-                logger.critical(
-                    "JWT secret was the default placeholder; persist failed "
-                    "(%s). Using random secret for THIS session only. Sessions "
-                    "will NOT survive a restart until config.yaml is writable.",
-                    exc,
-                )
+    if settings.influxdb_enabled:
+        from .history.client import influx_client
+        await influx_client.connect()
 
-        # Sync YAML config → env settings for InfluxDB
-        if config.influxdb.enabled or settings.influxdb_enabled:
-            if config.influxdb.url:
-                settings.influxdb_url = config.influxdb.url
-            if config.influxdb.token:
-                settings.influxdb_token = config.influxdb.token
-            if config.influxdb.org:
-                settings.influxdb_org = config.influxdb.org
-            if config.influxdb.bucket:
-                settings.influxdb_bucket = config.influxdb.bucket
-            settings.influxdb_enabled = True
-
-        if settings.influxdb_enabled:
-            from .history.client import influx_client
-            await influx_client.connect()
-
-        if config.data_sources.librenms.url:
-            scheduler.start()
+    if config.data_sources.librenms.url:
+        scheduler.start()
 
     revalidate_task = asyncio.create_task(revalidate_loop(ws_manager))
 
@@ -97,7 +82,7 @@ async def lifespan(app: FastAPI):
             await revalidate_task
 
     # Shutdown
-    if not settings.demo_mode and settings.influxdb_enabled:
+    if settings.influxdb_enabled:
         from .history.client import influx_client
         await influx_client.disconnect()
     await shutdown_notification_worker()
@@ -126,45 +111,29 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include routers
-if settings.demo_mode:
-    app.include_router(topology_router, prefix="/api", tags=["topology"])
-    app.include_router(devices_router, prefix="/api", tags=["devices"])
-    app.include_router(alerts_router, prefix="/api", tags=["alerts"])
-    app.include_router(diagnostics_router, prefix="/api", tags=["diagnostics"])
-    app.include_router(discovery_router, prefix="/api", tags=["discovery"])
-    app.include_router(vms_router, prefix="/api", tags=["vms"])
-    app.include_router(speedtest_router, prefix="/api", tags=["speedtest"])
-    app.include_router(paloalto_router, prefix="/api", tags=["paloalto"])
-    app.include_router(portgroups_router, prefix="/api", tags=["port-groups"])
-    app.include_router(ports_router, prefix="/api", tags=["ports"])
-    app.include_router(history_router, prefix="/api", tags=["history"])
-    app.include_router(settings_router, prefix="/api", tags=["settings"])
-    app.include_router(notifications_router, prefix="/api/notifications", tags=["notifications"])
-else:
-    protected = [Depends(get_current_user)]
-    admin_only = [Depends(require_admin)]
+protected = [Depends(get_current_user)]
+admin_only = [Depends(require_admin)]
 
-    # Read-leaning routers: any authenticated role can view. Endpoints that
-    # mutate inside these routers (alert ack/resolve, speedtest trigger,
-    # notification test send) opt up to operator/admin via per-route
-    # dependencies declared in the router files.
-    app.include_router(topology_router, prefix="/api", tags=["topology"], dependencies=protected)
-    app.include_router(devices_router, prefix="/api", tags=["devices"], dependencies=protected)
-    app.include_router(alerts_router, prefix="/api", tags=["alerts"], dependencies=protected)
-    app.include_router(vms_router, prefix="/api", tags=["vms"], dependencies=protected)
-    app.include_router(speedtest_router, prefix="/api", tags=["speedtest"], dependencies=protected)
-    app.include_router(portgroups_router, prefix="/api", tags=["port-groups"], dependencies=protected)
-    app.include_router(ports_router, prefix="/api", tags=["ports"], dependencies=protected)
-    app.include_router(history_router, prefix="/api", tags=["history"], dependencies=protected)
-    app.include_router(notifications_router, prefix="/api/notifications", tags=["notifications"], dependencies=protected)
+# Read-leaning routers: any authenticated role can view. Endpoints that
+# mutate inside these routers (alert ack/resolve, speedtest trigger,
+# notification test send) opt up to operator/admin via per-route
+# dependencies declared in the router files.
+app.include_router(topology_router, prefix="/api", tags=["topology"], dependencies=protected)
+app.include_router(devices_router, prefix="/api", tags=["devices"], dependencies=protected)
+app.include_router(alerts_router, prefix="/api", tags=["alerts"], dependencies=protected)
+app.include_router(vms_router, prefix="/api", tags=["vms"], dependencies=protected)
+app.include_router(speedtest_router, prefix="/api", tags=["speedtest"], dependencies=protected)
+app.include_router(portgroups_router, prefix="/api", tags=["port-groups"], dependencies=protected)
+app.include_router(ports_router, prefix="/api", tags=["ports"], dependencies=protected)
+app.include_router(history_router, prefix="/api", tags=["history"], dependencies=protected)
+app.include_router(notifications_router, prefix="/api/notifications", tags=["notifications"], dependencies=protected)
 
-    # Admin-only routers: all endpoints inside expose either credential probing
-    # (diagnostics/test/*), internal cache state, or config mutation surfaces.
-    app.include_router(diagnostics_router, prefix="/api", tags=["diagnostics"], dependencies=admin_only)
-    app.include_router(discovery_router, prefix="/api", tags=["discovery"], dependencies=admin_only)
-    app.include_router(paloalto_router, prefix="/api", tags=["paloalto"], dependencies=admin_only)
-    app.include_router(settings_router, prefix="/api", tags=["settings"], dependencies=admin_only)
+# Admin-only routers: all endpoints inside expose either credential probing
+# (diagnostics/test/*), internal cache state, or config mutation surfaces.
+app.include_router(diagnostics_router, prefix="/api", tags=["diagnostics"], dependencies=admin_only)
+app.include_router(discovery_router, prefix="/api", tags=["discovery"], dependencies=admin_only)
+app.include_router(paloalto_router, prefix="/api", tags=["paloalto"], dependencies=admin_only)
+app.include_router(settings_router, prefix="/api", tags=["settings"], dependencies=admin_only)
 
 app.include_router(auth_router, prefix="/api", tags=["auth"])
 
@@ -181,9 +150,8 @@ async def health_check():
 
 @app.get("/api/config")
 async def get_app_config():
-    """Get application configuration (for frontend to detect demo mode)."""
+    """Get application configuration."""
     return {
-        "demo_mode": settings.demo_mode,
         "dev_mode": settings.dev_mode,
     }
 

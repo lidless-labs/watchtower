@@ -24,7 +24,6 @@ interface NocState {
   isConnected: boolean
   sidebarOpen: boolean
   expandedClusters: Set<string>
-  demoMode: boolean
   detailPanelClusterId: string | null  // ID of cluster shown in detail panel
   hoveredEdgeId: string | null  // ID of currently hovered edge
 
@@ -41,7 +40,6 @@ interface NocState {
   toggleClusterExpanded: (clusterId: string) => void
   clearSelection: () => void
   setSpeedtestStatus: (status: SpeedtestStatus) => void
-  setDemoMode: (demoMode: boolean) => void
 
   // Detail panel actions
   openClusterDetail: (clusterId: string) => void
@@ -74,7 +72,6 @@ export const useNocStore = create<NocState>((set, get) => ({
   isConnected: false,
   sidebarOpen: true,
   expandedClusters: new Set<string>(),
-  demoMode: false,
   detailPanelClusterId: null,
   hoveredEdgeId: null,
 
@@ -176,7 +173,6 @@ export const useNocStore = create<NocState>((set, get) => ({
   clearSelection: () => set({ selectedDevice: null, selectedConnection: null }),
 
   setSpeedtestStatus: (speedtestStatus) => set({ speedtestStatus }),
-  setDemoMode: (demoMode) => set({ demoMode }),
 
   // Detail panel actions
   openClusterDetail: (clusterId) => set({ detailPanelClusterId: clusterId }),

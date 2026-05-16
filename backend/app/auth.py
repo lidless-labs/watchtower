@@ -85,20 +85,9 @@ def require_role(min_role: UserRole) -> Callable[..., dict]:
     decodes but is not in the enum (e.g. a forged "superuser") are rejected
     with 403, not silently treated as admin. Missing/invalid JWTs still 401
     via the underlying get_current_user dep.
-
-    Demo mode bypasses the check entirely so the public sandbox can keep
-    accepting unauthenticated POSTs to ack/resolve/trigger/test-channel.
-    Production (settings.demo_mode=False) is unaffected.
     """
 
     def _enforce(request: Request) -> dict:
-        # Lazy import: auth.py is imported at module load before settings is
-        # fully initialized in some startup paths.
-        from .config import settings
-
-        if settings.demo_mode:
-            return {"username": "demo", "role": UserRole.ADMIN.value}
-
         current_user = get_current_user(request)
         raw = current_user.get("role")
         try:
