@@ -119,7 +119,8 @@ export const useSettingsApiStore = create<SettingsApiState>((set, get) => ({
       } else {
         set({ isLoading: false })
       }
-    } catch {
+    } catch (err) {
+      console.error('[settings] fetchSettings failed', err)
       set({ isLoading: false })
     }
   },
@@ -131,8 +132,8 @@ export const useSettingsApiStore = create<SettingsApiState>((set, get) => ({
         const data = await res.json()
         set({ status: data })
       }
-    } catch {
-      // silent
+    } catch (err) {
+      console.error('[settings] fetchStatus failed', err)
     }
   },
 
@@ -154,7 +155,8 @@ export const useSettingsApiStore = create<SettingsApiState>((set, get) => ({
         set({ isSaving: false, saveError: err.detail || 'Save failed' })
         return false
       }
-    } catch {
+    } catch (err) {
+      console.error('[settings] saveSection failed', err)
       set({ isSaving: false, saveError: 'Network error' })
       return false
     }
@@ -178,7 +180,8 @@ export const useSettingsApiStore = create<SettingsApiState>((set, get) => ({
         set({ isSaving: false, saveError: err.detail || 'Save failed' })
         return false
       }
-    } catch {
+    } catch (err) {
+      console.error('[settings] saveAll failed', err)
       set({ isSaving: false, saveError: 'Network error' })
       return false
     }
@@ -192,7 +195,8 @@ export const useSettingsApiStore = create<SettingsApiState>((set, get) => ({
         body: JSON.stringify(params),
       })
       return await res.json()
-    } catch {
+    } catch (err) {
+      console.error('[settings] testConnection failed', err)
       return { status: 'error' as const, message: 'Network error' }
     }
   },

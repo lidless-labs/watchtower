@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useSettingsApiStore } from '../../store/settingsApiStore'
+import { Toggle } from '../common/Toggle'
 import SettingsTab from './SettingsTab'
 import SecretInput from './SecretInput'
 import NotificationHistory from './NotificationHistory'
@@ -16,14 +17,12 @@ function ChannelCard({ title, icon, enabled, onToggle, children }: {
           <span className="text-lg">{icon}</span>
           <h3 className="text-sm font-semibold text-text-primary">{title}</h3>
         </div>
-        <label className="flex items-center cursor-pointer">
-          <div
-            onClick={() => onToggle(!enabled)}
-            className={`w-9 h-5 rounded-full transition-colors relative ${enabled ? 'bg-accent-cyan' : 'bg-bg-tertiary border border-border-default'}`}
-          >
-            <div className={`w-3.5 h-3.5 rounded-full bg-white absolute top-0.5 transition-transform ${enabled ? 'translate-x-4' : 'translate-x-0.5'}`} />
-          </div>
-        </label>
+        <Toggle
+          checked={enabled}
+          onChange={onToggle}
+          label=""
+          ariaLabel={`${enabled ? 'Disable' : 'Enable'} ${title}`}
+        />
       </div>
       {enabled && <div className="space-y-3">{children}</div>}
       {!enabled && <div className="text-xs text-text-tertiary">Enable to configure</div>}
