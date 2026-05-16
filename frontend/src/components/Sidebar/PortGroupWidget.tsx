@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { fetchPortGroups } from '../../api/endpoints'
 import { apiClient } from '../../api/client'
-import type { PortGroupStats } from '../../demo/mockData'
+import type { PortGroupStats } from '../../api/endpoints'
 
 type WidgetState = 'loading' | 'no_data' | 'ready' | 'error'
 

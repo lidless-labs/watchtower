@@ -1,7 +1,6 @@
 import { useEffect } from 'react'
 import { useSettingsApiStore } from '../store/settingsApiStore'
 import { useAuthStore } from '../store/authStore'
-import { useNocStore } from '../store/nocStore'
 import IntegrationsTab from '../components/Settings/IntegrationsTab'
 import PollingTab from '../components/Settings/PollingTab'
 import AlertsTab from '../components/Settings/AlertsTab'
@@ -43,7 +42,6 @@ export default function SettingsPage() {
   const fetchSettings = useSettingsApiStore((s) => s.fetchSettings)
   const fetchStatus = useSettingsApiStore((s) => s.fetchStatus)
   const dirty = useSettingsApiStore((s) => s.dirty)
-  const demoMode = useNocStore((s) => s.demoMode)
   const user = useAuthStore((s) => s.user)
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
 
@@ -52,8 +50,7 @@ export default function SettingsPage() {
     fetchStatus()
   }, [fetchSettings, fetchStatus])
 
-  // In non-demo mode, require admin auth
-  if (!demoMode && (!isAuthenticated || user?.role !== 'admin')) {
+  if (!isAuthenticated || user?.role !== 'admin') {
     return (
       <div className="min-h-screen bg-bg-primary flex items-center justify-center">
         <div className="text-center">
@@ -96,11 +93,6 @@ export default function SettingsPage() {
             </span>
           </div>
         </div>
-        {demoMode && (
-          <span className="bg-accent-purple/20 text-accent-purple text-xs px-2 py-1 rounded font-medium">
-            DEMO — Read Only
-          </span>
-        )}
       </header>
 
       <div className="flex">

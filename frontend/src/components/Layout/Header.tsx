@@ -9,7 +9,6 @@ export default function Header() {
   const sidebarOpen = useNocStore((state) => state.sidebarOpen)
   const setSidebarOpen = useNocStore((state) => state.setSidebarOpen)
   const alerts = useAlertStore((state) => state.alerts)
-  const demoMode = useNocStore((state) => state.demoMode)
   const user = useAuthStore((state) => state.user)
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
   const logout = useAuthStore((state) => state.logout)
@@ -29,12 +28,6 @@ export default function Header() {
             S³
           </span>
         </div>
-        {demoMode && (
-          <span className="bg-accent-purple/20 text-accent-purple text-xs px-2 py-1 rounded font-medium">
-            DEMO
-          </span>
-        )}
-
         {/* GitHub link - hidden on mobile */}
         <a
           href="https://github.com/solomonneas/watchtower"
@@ -179,7 +172,7 @@ export default function Header() {
           </svg>
         </a>
 
-        {!demoMode && isAuthenticated && user && (
+        {isAuthenticated && user && (
           <div className="hidden md:flex items-center gap-2 px-2 py-1 rounded-lg bg-bg-tertiary border border-border-default">
             <div className="w-7 h-7 rounded-full bg-accent-cyan/20 text-accent-cyan flex items-center justify-center text-xs font-semibold">
               {user.username.slice(0, 1).toUpperCase()}

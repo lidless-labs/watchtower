@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse
 
 from app.auth import require_operator
 from app.cache import redis_cache
-from app.config import get_config, settings
+from app.config import get_config
 from app.polling.speedtest import (
     get_cached_result,
     run_speedtest,
@@ -40,10 +40,6 @@ async def get_speedtest() -> dict[str, Any]:
 
     Returns cached result or empty object if no test has run yet.
     """
-    if settings.demo_mode:
-        from app.demo_data import get_demo_speedtest
-        return get_demo_speedtest()
-
     result = await get_cached_result()
 
     if not result:
@@ -70,20 +66,6 @@ async def trigger_speedtest() -> dict[str, Any]:
     Enforces a 60-second cooldown between manual tests to prevent spam.
     Returns immediately with status; result will be broadcast via WebSocket.
     """
-    if settings.demo_mode:
-        # In demo mode, just broadcast a fake result immediately
-        from app.demo_data import get_demo_speedtest
-        result = get_demo_speedtest()
-        await ws_manager.broadcast({
-            "type": "speedtest_result",
-            "timestamp": datetime.utcnow().isoformat(),
-            "result": result,
-        })
-        return {
-            "status": "completed",
-            "message": "Demo speedtest completed (simulated data)",
-        }
-
     # Check cooldown
     last_trigger = await redis_cache.get(CACHE_LAST_TRIGGER)
     if last_trigger:
