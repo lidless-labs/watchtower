@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useSettingsApiStore } from '../../store/settingsApiStore'
+import { Toggle } from '../common/Toggle'
 import SettingsTab from './SettingsTab'
 
 const DEVICE_TYPES = ['firewall', 'network', 'server', 'wireless', 'printer', 'phone', 'power']
@@ -154,14 +155,12 @@ export default function DiscoveryTab() {
               Periodically re-discover devices from LibreNMS and update the topology.
             </p>
           </div>
-          <label className="flex items-center cursor-pointer">
-            <div
-              onClick={() => { setAutoSync(!autoSync); markDirty('discovery', true) }}
-              className={`w-9 h-5 rounded-full transition-colors relative ${autoSync ? 'bg-accent-cyan' : 'bg-bg-tertiary border border-border-default'}`}
-            >
-              <div className={`w-3.5 h-3.5 rounded-full bg-white absolute top-0.5 transition-transform ${autoSync ? 'translate-x-4' : 'translate-x-0.5'}`} />
-            </div>
-          </label>
+          <Toggle
+            checked={autoSync}
+            onChange={(next) => { setAutoSync(next); markDirty('discovery', true) }}
+            label=""
+            ariaLabel={`${autoSync ? 'Disable' : 'Enable'} auto sync`}
+          />
         </div>
 
         {autoSync && (

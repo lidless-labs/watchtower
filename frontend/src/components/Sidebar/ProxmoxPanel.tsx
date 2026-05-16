@@ -87,16 +87,16 @@ export default function ProxmoxPanel({ nodeName }: ProxmoxPanelProps) {
 
   if (loading && !data) {
     return (
-      <div className="proxmox-panel">
-        <div className="loading-spinner">Loading...</div>
+      <div className="flex flex-col gap-4">
+        <div className="px-5 py-5 text-center text-sm text-text-muted">Loading...</div>
       </div>
     )
   }
 
   if (error) {
     return (
-      <div className="proxmox-panel">
-        <div className="error-message">{error}</div>
+      <div className="flex flex-col gap-4">
+        <div className="px-5 py-5 text-center text-sm text-status-red">{error}</div>
       </div>
     )
   }
@@ -104,7 +104,7 @@ export default function ProxmoxPanel({ nodeName }: ProxmoxPanelProps) {
   if (!data) return null
 
   return (
-    <div className="proxmox-panel">
+    <div className="flex flex-col gap-4">
       {/* Node Section */}
       {data.node && (
         <Section
@@ -183,224 +183,6 @@ export default function ProxmoxPanel({ nodeName }: ProxmoxPanelProps) {
         </Section>
       )}
 
-      <style>{`
-        .proxmox-panel {
-          display: flex;
-          flex-direction: column;
-          gap: 16px;
-        }
-
-        .loading-spinner,
-        .error-message {
-          padding: 20px;
-          text-align: center;
-          color: #888;
-          font-size: 13px;
-        }
-
-        .error-message {
-          color: #ef4444;
-        }
-
-        .section {
-          background: #111;
-          border-radius: 8px;
-          border: 1px solid #222;
-          overflow: hidden;
-        }
-
-        .section-header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding: 10px 12px;
-          background: linear-gradient(180deg, #1a1a1a 0%, #111 100%);
-          border-bottom: 1px solid #222;
-        }
-
-        .section-title {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          font-size: 12px;
-          font-weight: 600;
-          color: #ccc;
-          text-transform: uppercase;
-          letter-spacing: 0.5px;
-        }
-
-        .section-icon {
-          width: 16px;
-          height: 16px;
-          color: #666;
-        }
-
-        .section-count {
-          font-size: 11px;
-          color: #666;
-          background: #1a1a1a;
-          padding: 2px 8px;
-          border-radius: 10px;
-          border: 1px solid #333;
-        }
-
-        .section-content {
-          padding: 0;
-        }
-
-        .resource-row {
-          display: grid;
-          grid-template-columns: 1fr 60px 60px;
-          align-items: center;
-          padding: 8px 12px;
-          border-bottom: 1px solid #1a1a1a;
-          transition: background 0.15s;
-        }
-
-        .resource-row:last-child {
-          border-bottom: none;
-        }
-
-        .resource-row:hover {
-          background: #1a1a1a;
-        }
-
-        .resource-name {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          font-size: 13px;
-          color: #ddd;
-          overflow: hidden;
-        }
-
-        .resource-name-text {
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
-
-        .status-dot {
-          width: 6px;
-          height: 6px;
-          border-radius: 50%;
-          flex-shrink: 0;
-        }
-
-        .status-running {
-          background: #22c55e;
-          box-shadow: 0 0 4px #22c55e;
-        }
-
-        .status-stopped {
-          background: #666;
-        }
-
-        .status-online {
-          background: #22c55e;
-          box-shadow: 0 0 4px #22c55e;
-        }
-
-        .resource-value {
-          font-family: 'JetBrains Mono', monospace;
-          font-size: 12px;
-          text-align: right;
-        }
-
-        .cpu-value {
-          color: #60a5fa;
-        }
-
-        .ram-value {
-          color: #a78bfa;
-        }
-
-        .column-header {
-          display: grid;
-          grid-template-columns: 1fr 60px 60px;
-          padding: 6px 12px;
-          font-size: 10px;
-          color: #555;
-          text-transform: uppercase;
-          letter-spacing: 0.5px;
-          border-bottom: 1px solid #1a1a1a;
-        }
-
-        .column-header span:not(:first-child) {
-          text-align: right;
-        }
-
-        .storage-row {
-          display: flex;
-          flex-direction: column;
-          padding: 10px 12px;
-          border-bottom: 1px solid #1a1a1a;
-          gap: 6px;
-        }
-
-        .storage-row:last-child {
-          border-bottom: none;
-        }
-
-        .storage-row:hover {
-          background: #1a1a1a;
-        }
-
-        .storage-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-        }
-
-        .storage-name {
-          font-size: 13px;
-          color: #ddd;
-        }
-
-        .storage-type {
-          font-size: 10px;
-          color: #555;
-          background: #1a1a1a;
-          padding: 2px 6px;
-          border-radius: 4px;
-        }
-
-        .storage-bar {
-          height: 6px;
-          background: #222;
-          border-radius: 3px;
-          overflow: hidden;
-        }
-
-        .storage-bar-fill {
-          height: 100%;
-          border-radius: 3px;
-          transition: width 0.3s ease;
-        }
-
-        .storage-bar-normal {
-          background: linear-gradient(90deg, #3b82f6 0%, #60a5fa 100%);
-        }
-
-        .storage-bar-warning {
-          background: linear-gradient(90deg, #f59e0b 0%, #fbbf24 100%);
-        }
-
-        .storage-bar-critical {
-          background: linear-gradient(90deg, #ef4444 0%, #f87171 100%);
-        }
-
-        .storage-info {
-          display: flex;
-          justify-content: space-between;
-          font-size: 11px;
-          color: #666;
-        }
-
-        .storage-percent {
-          color: #888;
-        }
-      `}</style>
     </div>
   )
 }
@@ -420,20 +202,25 @@ function Section({
   children: React.ReactNode
 }) {
   return (
-    <div className="section">
-      <div className="section-header">
-        <div className="section-title">
-          <span className="section-icon">{icon}</span>
+    <div className="overflow-hidden rounded-lg border border-border-default bg-bg-primary">
+      <div className="flex items-center justify-between border-b border-border-default bg-gradient-to-b from-bg-secondary to-bg-primary px-3 py-2.5">
+        <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-text-secondary">
+          <span className="h-4 w-4 text-text-tertiary">{icon}</span>
           <span>{title}</span>
         </div>
-        <span className="section-count">{count} / {total}</span>
+        <span className="rounded-full border border-border-default bg-bg-secondary px-2 py-0.5 text-[11px] text-text-tertiary">
+          {count} / {total}
+        </span>
       </div>
-      <div className="section-content">
+      <div>
         {title !== 'Storage' && (
-          <div className="column-header">
+          <div
+            className="grid border-b border-border-muted px-3 py-1.5 text-[10px] uppercase tracking-wider text-text-tertiary"
+            style={{ gridTemplateColumns: '1fr 60px 60px' }}
+          >
             <span>Name</span>
-            <span>CPU</span>
-            <span>RAM</span>
+            <span className="text-right">CPU</span>
+            <span className="text-right">RAM</span>
           </div>
         )}
         {children}
@@ -454,14 +241,23 @@ function ResourceRow({
   memory: number
   status: string
 }) {
+  const isLive = status === 'running' || status === 'online'
   return (
-    <div className="resource-row">
-      <div className="resource-name">
-        <span className={`status-dot status-${status}`} />
-        <span className="resource-name-text" title={name}>{name}</span>
+    <div
+      className="grid items-center border-b border-border-muted px-3 py-2 transition-colors last:border-b-0 hover:bg-bg-secondary"
+      style={{ gridTemplateColumns: '1fr 60px 60px' }}
+    >
+      <div className="flex items-center gap-2 overflow-hidden text-[13px] text-text-primary">
+        <span
+          aria-hidden="true"
+          className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${
+            isLive ? 'bg-status-green shadow-[0_0_4px_theme(colors.status-green)]' : 'bg-text-tertiary'
+          }`}
+        />
+        <span className="truncate" title={name}>{name}</span>
       </div>
-      <span className="resource-value cpu-value">{cpu.toFixed(1)}%</span>
-      <span className="resource-value ram-value">{memory.toFixed(1)}%</span>
+      <span className="text-right font-mono text-xs text-accent-blue">{cpu.toFixed(1)}%</span>
+      <span className="text-right font-mono text-xs text-accent-purple">{memory.toFixed(1)}%</span>
     </div>
   )
 }
@@ -480,23 +276,28 @@ function StorageRow({
   total: number
   usedPercent: number
 }) {
-  const barClass = usedPercent >= 90 ? 'critical' : usedPercent >= 70 ? 'warning' : 'normal'
+  const barGradient =
+    usedPercent >= 90
+      ? 'bg-gradient-to-r from-red-500 to-red-400'
+      : usedPercent >= 70
+      ? 'bg-gradient-to-r from-amber-500 to-amber-400'
+      : 'bg-gradient-to-r from-blue-500 to-blue-400'
 
   return (
-    <div className="storage-row">
-      <div className="storage-header">
-        <span className="storage-name">{name}</span>
-        <span className="storage-type">{type}</span>
+    <div className="flex flex-col gap-1.5 border-b border-border-muted px-3 py-2.5 transition-colors last:border-b-0 hover:bg-bg-secondary">
+      <div className="flex items-center justify-between">
+        <span className="text-[13px] text-text-primary">{name}</span>
+        <span className="rounded bg-bg-secondary px-1.5 py-0.5 text-[10px] text-text-tertiary">{type}</span>
       </div>
-      <div className="storage-bar">
+      <div className="h-1.5 overflow-hidden rounded-full bg-bg-tertiary">
         <div
-          className={`storage-bar-fill storage-bar-${barClass}`}
+          className={`h-full rounded-full transition-[width] duration-300 ${barGradient}`}
           style={{ width: `${Math.min(usedPercent, 100)}%` }}
         />
       </div>
-      <div className="storage-info">
+      <div className="flex items-center justify-between text-[11px] text-text-tertiary">
         <span>{formatBytes(used)} / {formatBytes(total)}</span>
-        <span className="storage-percent">{usedPercent.toFixed(1)}%</span>
+        <span className="text-text-muted">{usedPercent.toFixed(1)}%</span>
       </div>
     </div>
   )
