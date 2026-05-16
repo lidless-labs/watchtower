@@ -6,7 +6,7 @@ from typing import Callable
 
 import bcrypt
 import jwt
-from fastapi import Depends, HTTPException, Request
+from fastapi import HTTPException, Request
 
 from .config import config
 
