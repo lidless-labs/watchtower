@@ -138,46 +138,15 @@ async def test_role_check_is_independent_of_endpoint_method(role_client):
     assert r.status_code == 403
 
 
-async def test_demo_mode_bypasses_role_check(role_client, monkeypatch):
-    """When settings.demo_mode is True, require_role admits unauthenticated calls.
-
-    Demo mode mounts the routers in main.py with no auth dep, but per-route
-    Depends(require_*) inside individual routers would still run and 401 on
-    every demo POST if require_role did not short-circuit. The sandbox public
-    deployment depends on this.
-    """
-    from app import config as config_module
-
-    monkeypatch.setattr(config_module.settings, "demo_mode", True)
-    # No Authorization header.
-    r = await role_client.get("/admin-only")
-    assert r.status_code == 200, (
-        f"demo_mode must let unauthenticated calls through role gate, "
-        f"got {r.status_code} {r.text}"
-    )
-
-
-async def test_demo_mode_does_not_unlock_prod(role_client, monkeypatch):
-    """Sanity: when demo_mode flips back to False the gate re-engages."""
-    from app import config as config_module
-
-    monkeypatch.setattr(config_module.settings, "demo_mode", False)
-    r = await role_client.get("/admin-only")
-    assert r.status_code == 401, "no token + non-demo must 401"
-
-
-async def test_real_alerts_router_role_gating_in_prod(wired_redis_cache, monkeypatch):
+async def test_real_alerts_router_role_gating_in_prod(wired_redis_cache):
     """Integration: mount the actual alerts router; viewer hits ack endpoint => 403.
 
     Synthetic role_app tests prove the dep factory itself. This one proves the
     real router file wired the dep correctly so a refactor that drops the
     decorator regresses the test, not just the unit harness.
     """
-    from app import config as config_module
     from app.routers import alerts as alerts_module
     from fastapi import FastAPI
-
-    monkeypatch.setattr(config_module.settings, "demo_mode", False)
 
     app = FastAPI()
     app.include_router(alerts_module.router, prefix="/api")
@@ -188,24 +157,6 @@ async def test_real_alerts_router_role_gating_in_prod(wired_redis_cache, monkeyp
             headers={"Authorization": f"Bearer {_token('viewer')}"},
         )
     assert r.status_code == 403, (
-        f"viewer POSTing acknowledge in prod must 403; if this drops to 200 "
+        f"viewer POSTing acknowledge must 403; if this drops to 200 "
         f"the role decorator on the real router file is gone. got {r.status_code}"
-    )
-
-
-async def test_real_alerts_router_works_in_demo(wired_redis_cache, monkeypatch):
-    """Integration: same router, demo_mode=True; no token; ack returns 200."""
-    from app import config as config_module
-    from app.routers import alerts as alerts_module
-    from fastapi import FastAPI
-
-    monkeypatch.setattr(config_module.settings, "demo_mode", True)
-
-    app = FastAPI()
-    app.include_router(alerts_module.router, prefix="/api")
-
-    async with _make_client(app) as ac:
-        r = await ac.post("/api/alert/x/acknowledge")
-    assert r.status_code == 200, (
-        f"demo_mode + no token + real router must 200; got {r.status_code} {r.text}"
     )

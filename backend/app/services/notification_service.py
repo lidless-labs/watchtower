@@ -55,7 +55,7 @@ class DeliveryRecord:
     alert_type: str
     severity: str
     device: str
-    status: str  # success | failed | cooldown | demo
+    status: str  # success | failed | cooldown
     timestamp: float = 0.0
     error: Optional[str] = None
     response_code: Optional[int] = None
@@ -68,7 +68,7 @@ class NotificationService:
     def __init__(self):
         self.history: deque[DeliveryRecord] = deque(maxlen=200)
         self._counter = 0
-        self._stats = {"sent": 0, "failed": 0, "cooldown": 0, "demo": 0}
+        self._stats = {"sent": 0, "failed": 0, "cooldown": 0}
 
     def _next_id(self) -> str:
         self._counter += 1
@@ -86,7 +86,6 @@ class NotificationService:
         message: str,
         details: str = "",
         config: dict | None = None,
-        demo: bool = False,
         is_recovery: bool = False,
     ) -> list[DeliveryRecord]:
         """Dispatch notification to all enabled channels."""
@@ -112,7 +111,7 @@ class NotificationService:
         if discord_cfg.get("enabled") and discord_cfg.get("webhook_url"):
             record = await self._dispatch_channel(
                 "discord", alert_id, alert_type, severity, device, message, details,
-                discord_cfg, cooldown_min, demo, is_recovery,
+                discord_cfg, cooldown_min, is_recovery,
             )
             records.append(record)
 
@@ -121,7 +120,7 @@ class NotificationService:
         if pushover_cfg.get("enabled") and pushover_cfg.get("user_key") and pushover_cfg.get("app_token"):
             record = await self._dispatch_channel(
                 "pushover", alert_id, alert_type, severity, device, message, details,
-                pushover_cfg, cooldown_min, demo, is_recovery,
+                pushover_cfg, cooldown_min, is_recovery,
             )
             records.append(record)
 
@@ -130,7 +129,7 @@ class NotificationService:
         if email_cfg.get("enabled") and email_cfg.get("smtp_host") and email_cfg.get("recipients"):
             record = await self._dispatch_channel(
                 "email", alert_id, alert_type, severity, device, message, details,
-                email_cfg, cooldown_min, demo, is_recovery,
+                email_cfg, cooldown_min, is_recovery,
             )
             records.append(record)
 
@@ -139,7 +138,7 @@ class NotificationService:
     async def _dispatch_channel(
         self, channel: str, alert_id: str, alert_type: str, severity: str,
         device: str, message: str, details: str, channel_cfg: dict,
-        cooldown_min: int, demo: bool, is_recovery: bool,
+        cooldown_min: int, is_recovery: bool,
     ) -> DeliveryRecord:
         record = DeliveryRecord(
             id=self._next_id(), channel=channel, alert_id=alert_id,
@@ -176,15 +175,6 @@ class NotificationService:
             record.error = f"Rate limited ({_GLOBAL_RATE_LIMIT}/{_GLOBAL_RATE_WINDOW}s)"
             self._stats["failed"] += 1
             self.history.append(record)
-            return record
-
-        # Demo mode
-        if demo:
-            record.status = "demo"
-            record.response_code = 200
-            self._stats["demo"] += 1
-            self.history.append(record)
-            logger.info(f"[DEMO] Notification to {channel}: {message}")
             return record
 
         # Real dispatch. Cooldown is already claimed, so a failed dispatch

@@ -13,7 +13,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from app.config import get_config, settings
+from app.config import get_config
 from app.polling.librenms import LibreNMSClient
 
 router = APIRouter(prefix="/port-groups", tags=["port-groups"])
@@ -56,11 +56,6 @@ async def get_port_groups() -> list[PortGroupStats]:
 
     Returns traffic rates aggregated across all ports matching each group's alias pattern.
     """
-    if settings.demo_mode:
-        from app.demo_data import get_demo_port_groups
-        demo_data = get_demo_port_groups()
-        return [PortGroupStats(**pg) for pg in demo_data]
-
     config = get_config()
     port_groups = config.port_groups
 

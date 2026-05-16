@@ -25,11 +25,6 @@ def _require_admin(current_user: dict) -> None:
         raise HTTPException(status_code=403, detail="Admin access required")
 
 
-def _demo_mode_write_guard() -> None:
-    if settings.demo_mode:
-        raise HTTPException(status_code=403, detail="Settings are read-only in demo mode")
-
-
 def _join_url(base_url: str, path: str) -> str:
     return f"{base_url.rstrip('/')}{path}"
 
@@ -166,7 +161,6 @@ async def put_settings(
     current_user: dict = Depends(get_current_user),
 ):
     _require_admin(current_user)
-    _demo_mode_write_guard()
 
     persist_config(body)
     return mask_secrets(get_config_dict())
@@ -179,7 +173,6 @@ async def patch_settings_section(
     current_user: dict = Depends(get_current_user),
 ):
     _require_admin(current_user)
-    _demo_mode_write_guard()
 
     persist_config({section: body})
     return mask_secrets(get_config_dict())
@@ -191,7 +184,6 @@ async def test_connection(
     current_user: dict = Depends(get_current_user),
 ):
     _require_admin(current_user)
-    _demo_mode_write_guard()
 
     data = payload.model_dump()
     return await _run_connection_test(data)
@@ -212,13 +204,6 @@ async def get_settings_status(_current_user: dict = Depends(get_current_user)):
         "redis": {"connected": False},
         "speedtest": {"enabled": bool(config.speedtest.enabled)},
     }
-
-    if settings.demo_mode:
-        for key in ("librenms", "netdisco", "proxmox", "influxdb"):
-            if status[key]["configured"]:
-                status[key]["connected"] = True
-        status["redis"]["connected"] = True
-        return status
 
     try:
         await redis_cache.client.ping()

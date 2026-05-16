@@ -69,19 +69,15 @@ function useHashRoute(): string {
   return route
 }
 
-function DashboardApp({ demoMode }: { demoMode: boolean }) {
+function DashboardApp() {
   const setTopology = useNocStore((state) => state.setTopology)
   const setLoading = useNocStore((state) => state.setLoading)
   const setError = useNocStore((state) => state.setError)
   const setSpeedtestStatus = useNocStore((state) => state.setSpeedtestStatus)
-  const setDemoMode = useNocStore((state) => state.setDemoMode)
 
-  // Connect to WebSocket (no-op in demo mode)
   useWebSocket()
 
   useEffect(() => {
-    setDemoMode(demoMode)
-
     async function loadData() {
       setLoading(true)
       try {
@@ -101,7 +97,7 @@ function DashboardApp({ demoMode }: { demoMode: boolean }) {
     }
 
     loadData()
-  }, [demoMode, setTopology, setLoading, setError, setSpeedtestStatus, setDemoMode])
+  }, [setTopology, setLoading, setError, setSpeedtestStatus])
 
   return (
     <ReactFlowProvider>
@@ -115,8 +111,6 @@ function DashboardApp({ demoMode }: { demoMode: boolean }) {
 
 function App() {
   const route = useHashRoute()
-  const [demoMode, setDemoMode] = useState(true)
-  const [configLoaded, setConfigLoaded] = useState(false)
 
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
   const initialSetupComplete = useAuthStore((state) => state.initialSetupComplete)
@@ -142,26 +136,7 @@ function App() {
     }
   }, [isAuthenticated, initialSetupComplete, clearInitialSetupFlag])
 
-  useEffect(() => {
-    async function loadConfig() {
-      try {
-        const response = await fetch('/api/config')
-        if (response.ok) {
-          const data: { demo_mode?: boolean } = await response.json()
-          setDemoMode(Boolean(data.demo_mode))
-        }
-      } catch {
-        // Default to demo mode if config request fails
-        setDemoMode(true)
-      } finally {
-        setConfigLoaded(true)
-      }
-    }
-
-    loadConfig()
-  }, [])
-
-  if (!configLoaded || !authChecked) {
+  if (!authChecked) {
     return (
       <div className="min-h-screen bg-bg-primary text-text-secondary flex items-center justify-center">
         Loading...
@@ -176,18 +151,15 @@ function App() {
 
   const loginRoute = route === '/login' || route === 'login'
 
-  // Auth gate: require authentication for all protected routes in non-demo mode
-  if (!demoMode && !isAuthenticated) {
+  if (!isAuthenticated) {
     return <LoginPage showInitialSetupMessage={initialSetupComplete} />
   }
 
-  // Redirect authenticated users away from login page to dashboard
-  if (!demoMode && isAuthenticated && loginRoute) {
+  if (loginRoute) {
     window.location.hash = '#/'
     return null
   }
 
-  // Protected routes (auth verified above in non-demo mode)
   if (route === '/history' || route === 'history') {
     return <HistoryPage />
   }
@@ -203,7 +175,7 @@ function App() {
           Admin account configured.
         </div>
       )}
-      <DashboardApp demoMode={demoMode} />
+      <DashboardApp />
     </>
   )
 }

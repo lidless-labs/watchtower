@@ -3,7 +3,6 @@
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
-from ..config import settings
 from ..models.device import DeviceStatus
 from ..models.topology import Topology, TopologySummary
 from ..models.vlan import L3Topology
@@ -29,9 +28,6 @@ class TopInterface(BaseModel):
 @router.get("/topology", response_model=Topology)
 async def get_topology():
     """Get the full network topology with all devices, connections, and stats."""
-    if settings.demo_mode:
-        from ..demo_data import get_demo_topology
-        return get_demo_topology()
     return await get_aggregated_topology()
 
 
@@ -63,9 +59,6 @@ async def get_l3_topology_endpoint():
     Returns VLAN groups with devices, gateway identification,
     and VLAN membership data.
     """
-    if settings.demo_mode:
-        from ..demo_data import get_demo_l3_topology
-        return get_demo_l3_topology()
     return await get_l3_topology()
 
 
@@ -80,31 +73,6 @@ async def get_top_interfaces(
     Returns interfaces sorted by total traffic (in + out) in descending order.
     Useful for identifying the busiest network links.
     """
-    if settings.demo_mode:
-        # Return demo data
-        return [
-            TopInterface(
-                device="s0-2266",
-                interface="Te1/1",
-                description="Uplink to s0-2281",
-                in_mbps=245.5,
-                out_mbps=180.3,
-                total_mbps=425.8,
-                speed_mbps=10000,
-                utilization_pct=4.3,
-            ),
-            TopInterface(
-                device="s0-2281",
-                interface="Te1/1",
-                description="Uplink to s0-2266",
-                in_mbps=180.3,
-                out_mbps=245.5,
-                total_mbps=425.8,
-                speed_mbps=10000,
-                utilization_pct=4.3,
-            ),
-        ]
-
     interfaces: list[TopInterface] = []
 
     async with LibreNMSClient() as client:

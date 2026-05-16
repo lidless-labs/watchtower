@@ -35,7 +35,7 @@ export default function SpeedtestWidget() {
         if (data.status === 'no_data') {
           setState('no_data')
         } else {
-          setResult(data as SpeedtestResult)
+          setResult(data as unknown as SpeedtestResult)
           setState('ready')
         }
       } catch (err) {

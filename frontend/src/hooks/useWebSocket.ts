@@ -11,7 +11,6 @@ function getWebSocketUrl(token: string): string {
 
 export function useWebSocket() {
   const setConnected = useNocStore((state) => state.setConnected)
-  const demoMode = useNocStore((state) => state.demoMode)
   const socketRef = useRef<WebSocket | null>(null)
   const reconnectTimerRef = useRef<number | null>(null)
 
@@ -30,11 +29,6 @@ export function useWebSocket() {
   }, [setConnected])
 
   const connect = useCallback(() => {
-    if (demoMode) {
-      setConnected(true)
-      return
-    }
-
     const token = useAuthStore.getState().token || localStorage.getItem('watchtower_token')
     if (!token) {
       setConnected(false)
@@ -72,7 +66,7 @@ export function useWebSocket() {
       socketRef.current = null
       setConnected(false)
 
-      if (!shouldReconnect || demoMode) {
+      if (!shouldReconnect) {
         return
       }
 
@@ -81,7 +75,7 @@ export function useWebSocket() {
         connect()
       }, 3000)
     }
-  }, [demoMode, setConnected])
+  }, [setConnected])
 
   useEffect(() => {
     connect()
@@ -89,7 +83,7 @@ export function useWebSocket() {
   }, [connect, disconnect])
 
   return {
-    isConnected: demoMode ? true : Boolean(socketRef.current && socketRef.current.readyState === WebSocket.OPEN),
+    isConnected: Boolean(socketRef.current && socketRef.current.readyState === WebSocket.OPEN),
     connect,
     disconnect,
   }

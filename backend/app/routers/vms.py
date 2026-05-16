@@ -4,7 +4,6 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from ..cache import redis_cache
-from ..config import settings
 from ..polling.scheduler import CACHE_PROXMOX_VMS, CACHE_PROXMOX
 
 router = APIRouter()
@@ -49,11 +48,7 @@ async def list_vms():
 
     Returns VMs sorted by name with summary statistics.
     """
-    if settings.demo_mode:
-        from ..demo_data import get_demo_vms
-        cached = get_demo_vms()
-    else:
-        cached = await redis_cache.get_json(CACHE_PROXMOX_VMS) or []
+    cached = await redis_cache.get_json(CACHE_PROXMOX_VMS) or []
 
     vms = [ProxmoxVMResponse(**vm) for vm in cached]
     vms.sort(key=lambda v: v.name.lower())
@@ -77,11 +72,7 @@ async def list_vms():
 @router.get("/vms/summary", response_model=VMSummary)
 async def get_vm_summary():
     """Get summary statistics for running VMs."""
-    if settings.demo_mode:
-        from ..demo_data import get_demo_vms
-        cached = get_demo_vms()
-    else:
-        cached = await redis_cache.get_json(CACHE_PROXMOX_VMS) or []
+    cached = await redis_cache.get_json(CACHE_PROXMOX_VMS) or []
 
     vms = [ProxmoxVMResponse(**vm) for vm in cached]
 
@@ -147,14 +138,8 @@ async def get_node_detail(node_name: str):
 
     The node_name can match the node field OR the instance field.
     """
-    if settings.demo_mode:
-        from ..demo_data import get_demo_proxmox_nodes, get_demo_vms
-        cached_nodes = get_demo_proxmox_nodes()
-        cached_vms = get_demo_vms()
-    else:
-        # Get cached node data
-        cached_nodes = await redis_cache.get_json(CACHE_PROXMOX) or {}
-        cached_vms = await redis_cache.get_json(CACHE_PROXMOX_VMS) or []
+    cached_nodes = await redis_cache.get_json(CACHE_PROXMOX) or {}
+    cached_vms = await redis_cache.get_json(CACHE_PROXMOX_VMS) or []
 
     # Find matching node - try various matching strategies
     node_data = None
@@ -242,7 +227,7 @@ async def get_node_detail(node_name: str):
 
     # Get storage - need to fetch from API (skip in demo mode)
     storage_list = []
-    if matched_node_name and matched_instance and not settings.demo_mode:
+    if matched_node_name and matched_instance:
         try:
             from ..config import get_settings
             from ..polling.proxmox import ProxmoxClient

@@ -16,7 +16,7 @@ from typing import Any
 from fastapi import APIRouter, Query
 
 from app.config import settings, get_config
-from app.history import demo_history_store, history_reader, csv_history_reader
+from app.history import history_reader, csv_history_reader
 
 router = APIRouter()
 
@@ -50,8 +50,6 @@ def _resolve_window(
 
 
 def _reader():
-    if settings.demo_mode:
-        return demo_history_store
     # Check both settings and yaml config for InfluxDB enabled state
     config = get_config()
     if settings.influxdb_enabled or config.influxdb.enabled:
@@ -165,7 +163,7 @@ async def get_network_summary(
     start_expr, stop_expr, aggregate_window = _resolve_window(range, start, stop, aggregate)
     data = await _reader().get_network_summary(start_expr, stop_expr, aggregate_window)
 
-    # Normalize: demo_store returns {series: {...}}, convert to {points: [...]}
+    # Normalize: some readers return {series: {...}}, convert to {points: [...]}
     series = data.get("series", {})
     if series:
         points = _merge_series_to_points(series)
