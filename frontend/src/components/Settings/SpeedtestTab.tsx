@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useSettingsApiStore } from '../../store/settingsApiStore'
+import { Toggle } from '../common/Toggle'
 import SettingsTab from './SettingsTab'
 
 export default function SpeedtestTab() {
@@ -52,13 +53,11 @@ export default function SpeedtestTab() {
       })}
     >
       <div className="bg-bg-secondary rounded-lg border border-border-default p-5 space-y-4">
-        <label className="flex items-center gap-2 cursor-pointer">
-          <div onClick={() => update('enabled', !form.enabled)}
-            className={`w-9 h-5 rounded-full transition-colors relative ${form.enabled ? 'bg-accent-cyan' : 'bg-bg-tertiary border border-border-default'}`}>
-            <div className={`w-3.5 h-3.5 rounded-full bg-white absolute top-0.5 transition-transform ${form.enabled ? 'translate-x-4' : 'translate-x-0.5'}`} />
-          </div>
-          <span className="text-sm text-text-primary font-medium">Enable speedtest polling</span>
-        </label>
+        <Toggle
+          checked={form.enabled}
+          onChange={(next) => update('enabled', next)}
+          label="Enable speedtest polling"
+        />
 
         {form.enabled && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

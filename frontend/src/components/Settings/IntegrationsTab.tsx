@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useSettingsApiStore } from '../../store/settingsApiStore'
+import { Toggle } from '../common/Toggle'
 import SettingsTab from './SettingsTab'
 import SecretInput from './SecretInput'
 import ConnectionTest from './ConnectionTest'
@@ -29,20 +30,6 @@ function TextInput({ value, onChange, placeholder, mono }: {
       placeholder={placeholder}
       className={`w-full bg-bg-primary border border-border-default rounded-lg px-3 py-2 text-text-primary text-sm focus:outline-none focus:ring-2 focus:ring-accent-cyan/40 ${mono ? 'font-mono' : ''}`}
     />
-  )
-}
-
-function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
-  return (
-    <label className="flex items-center gap-2 cursor-pointer">
-      <div
-        onClick={() => onChange(!checked)}
-        className={`w-9 h-5 rounded-full transition-colors relative ${checked ? 'bg-accent-cyan' : 'bg-bg-tertiary border border-border-default'}`}
-      >
-        <div className={`w-3.5 h-3.5 rounded-full bg-white absolute top-0.5 transition-transform ${checked ? 'translate-x-4' : 'translate-x-0.5'}`} />
-      </div>
-      <span className="text-sm text-text-secondary">{label}</span>
-    </label>
   )
 }
 
@@ -97,8 +84,12 @@ export default function IntegrationsTab() {
     if (influx) setInfluxdb({ url: influx.url || '', token: influx.token || '', org: influx.org || '', bucket: influx.bucket || '', enabled: influx.enabled || false })
   }, [settings])
 
-  const updateField = (setter: Function, field: string, value: unknown) => {
-    setter((prev: Record<string, unknown>) => ({ ...prev, [field]: value }))
+  const updateField = <T extends Record<string, unknown>>(
+    setter: React.Dispatch<React.SetStateAction<T>>,
+    field: keyof T,
+    value: T[keyof T],
+  ) => {
+    setter((prev) => ({ ...prev, [field]: value }))
     markDirty('integrations', true)
   }
 
