@@ -4,8 +4,9 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from datetime import datetime
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from ..auth import require_operator
 from ..cache import redis_cache
 from ..config import get_config, settings
 from ..polling.aggregator import get_aggregated_topology
@@ -285,14 +286,14 @@ async def get_alert(alert_id: str):
     raise HTTPException(status_code=404, detail=f"Alert '{alert_id}' not found")
 
 
-@router.post("/alert/{alert_id}/acknowledge")
+@router.post("/alert/{alert_id}/acknowledge", dependencies=[Depends(require_operator)])
 async def acknowledge_alert(alert_id: str):
     """Acknowledge an alert."""
     _acknowledged_alerts.add(alert_id)
     return {"status": "acknowledged", "alert_id": alert_id}
 
 
-@router.post("/alert/{alert_id}/resolve")
+@router.post("/alert/{alert_id}/resolve", dependencies=[Depends(require_operator)])
 async def resolve_alert(alert_id: str):
     """Resolve an alert (removes from acknowledged set)."""
     _acknowledged_alerts.discard(alert_id)

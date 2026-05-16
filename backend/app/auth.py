@@ -2,10 +2,11 @@
 
 from datetime import datetime, timedelta, timezone
 from enum import Enum
+from typing import Callable
 
 import bcrypt
 import jwt
-from fastapi import HTTPException, Request
+from fastapi import Depends, HTTPException, Request
 
 from .config import config
 
@@ -68,3 +69,52 @@ def get_current_user(request: Request) -> dict:
         raise HTTPException(status_code=401, detail="Missing authentication token")
 
     return decode_token(token)
+
+
+_ROLE_RANK = {
+    UserRole.VIEWER: 0,
+    UserRole.OPERATOR: 1,
+    UserRole.ADMIN: 2,
+}
+
+
+def require_role(min_role: UserRole) -> Callable[..., dict]:
+    """Build a FastAPI dep admitting only callers with role >= min_role.
+
+    Hierarchy is admin > operator > viewer. Authenticated callers whose role
+    decodes but is not in the enum (e.g. a forged "superuser") are rejected
+    with 403, not silently treated as admin. Missing/invalid JWTs still 401
+    via the underlying get_current_user dep.
+
+    Demo mode bypasses the check entirely so the public sandbox can keep
+    accepting unauthenticated POSTs to ack/resolve/trigger/test-channel.
+    Production (settings.demo_mode=False) is unaffected.
+    """
+
+    def _enforce(request: Request) -> dict:
+        # Lazy import: auth.py is imported at module load before settings is
+        # fully initialized in some startup paths.
+        from .config import settings
+
+        if settings.demo_mode:
+            return {"username": "demo", "role": UserRole.ADMIN.value}
+
+        current_user = get_current_user(request)
+        raw = current_user.get("role")
+        try:
+            actual = UserRole(raw)
+        except ValueError:
+            raise HTTPException(status_code=403, detail="Unknown role")
+        if _ROLE_RANK[actual] < _ROLE_RANK[min_role]:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Requires {min_role.value} role or higher",
+            )
+        return current_user
+
+    return _enforce
+
+
+require_admin = require_role(UserRole.ADMIN)
+require_operator = require_role(UserRole.OPERATOR)
+require_viewer = require_role(UserRole.VIEWER)

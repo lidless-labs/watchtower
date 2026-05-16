@@ -11,9 +11,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 
+from app.auth import require_operator
 from app.cache import redis_cache
 from app.config import get_config, settings
 from app.polling.speedtest import (
@@ -61,7 +62,7 @@ async def get_speedtest() -> dict[str, Any]:
     return result
 
 
-@router.post("/trigger")
+@router.post("/trigger", dependencies=[Depends(require_operator)])
 async def trigger_speedtest() -> dict[str, Any]:
     """
     Trigger a manual speedtest.

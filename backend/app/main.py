@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .auth import get_current_user
+from .auth import get_current_user, require_admin
 from .cache import redis_cache
 from .config import config, settings, persist_config, reload_config
 from .polling import scheduler
@@ -143,19 +143,28 @@ if settings.demo_mode:
     app.include_router(notifications_router, prefix="/api/notifications", tags=["notifications"])
 else:
     protected = [Depends(get_current_user)]
+    admin_only = [Depends(require_admin)]
+
+    # Read-leaning routers: any authenticated role can view. Endpoints that
+    # mutate inside these routers (alert ack/resolve, speedtest trigger,
+    # notification test send) opt up to operator/admin via per-route
+    # dependencies declared in the router files.
     app.include_router(topology_router, prefix="/api", tags=["topology"], dependencies=protected)
     app.include_router(devices_router, prefix="/api", tags=["devices"], dependencies=protected)
     app.include_router(alerts_router, prefix="/api", tags=["alerts"], dependencies=protected)
-    app.include_router(diagnostics_router, prefix="/api", tags=["diagnostics"], dependencies=protected)
-    app.include_router(discovery_router, prefix="/api", tags=["discovery"], dependencies=protected)
     app.include_router(vms_router, prefix="/api", tags=["vms"], dependencies=protected)
     app.include_router(speedtest_router, prefix="/api", tags=["speedtest"], dependencies=protected)
-    app.include_router(paloalto_router, prefix="/api", tags=["paloalto"], dependencies=protected)
     app.include_router(portgroups_router, prefix="/api", tags=["port-groups"], dependencies=protected)
     app.include_router(ports_router, prefix="/api", tags=["ports"], dependencies=protected)
     app.include_router(history_router, prefix="/api", tags=["history"], dependencies=protected)
-    app.include_router(settings_router, prefix="/api", tags=["settings"], dependencies=protected)
     app.include_router(notifications_router, prefix="/api/notifications", tags=["notifications"], dependencies=protected)
+
+    # Admin-only routers: all endpoints inside expose either credential probing
+    # (diagnostics/test/*), internal cache state, or config mutation surfaces.
+    app.include_router(diagnostics_router, prefix="/api", tags=["diagnostics"], dependencies=admin_only)
+    app.include_router(discovery_router, prefix="/api", tags=["discovery"], dependencies=admin_only)
+    app.include_router(paloalto_router, prefix="/api", tags=["paloalto"], dependencies=admin_only)
+    app.include_router(settings_router, prefix="/api", tags=["settings"], dependencies=admin_only)
 
 app.include_router(auth_router, prefix="/api", tags=["auth"])
 
