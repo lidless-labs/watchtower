@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict
 
 from ..auth import UserRole, get_current_user
 from ..cache import redis_cache
-from ..config import get_config, get_config_dict, mask_secrets, persist_config, settings
+from ..config import get_config, get_config_dict, mask_secrets, persist_config
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
