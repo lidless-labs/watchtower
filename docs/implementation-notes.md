@@ -322,6 +322,43 @@ high-confidence findings, file the rest". Five fixes inline, three issues filed.
 - `npm run lint` still broken on the same pre-existing eslint config gap
   noted in Phase 0. Out of scope.
 
+### Codex follow-up (PR #37)
+
+Three Medium-severity findings raised in the Codex review of PRs #30, #31,
+and #36. Each fix is surgical - no refactors, no new deps.
+
+- **`frontend/src/components/Topology/TopologyTiers.tsx` (buildEdges + SVG
+  overlay):** same-tier cluster pairs (firewall HA, switch stack, NAS-to-NAS
+  replication) used to be dropped by an `if (sEntry.rank === tEntry.rank)
+  continue` and rendered invisible. They are now flagged `sameTier` on the
+  `RenderEdge` and drawn as a quadratic-Bezier `<path>` with a ~35px
+  perpendicular control-point offset so the arc dips above the lane row
+  without overlapping cross-tier straight lines. Color / width / dash /
+  collapse-by-worst-status logic is unchanged. Self-loops (A == B - same
+  cluster on both endpoints) are still dropped since they'd render as a
+  zero-length arc.
+
+- **`frontend/src/pages/ClusterDetailPage.tsx` (top-level guards):** a cold
+  load of `#/cluster/:id` that hits a backend / network failure used to
+  loop on "Loading..." forever because the page only checked `!topology`.
+  The page now subscribes to `isLoading` and `error` from `useNocStore`
+  alongside `topology`, with three guard cases: still-loading shows
+  "Loading topology...", fetch-failed shows a connection-error block with
+  Retry (reload) + Back-to-topology buttons (styling matches the
+  equivalent block in `Layout.tsx`), and topology-loaded-but-cluster-not-
+  found keeps the existing "Cluster not found" branch.
+
+- **`frontend/src/App.tsx` (route-level ErrorBoundary):** every route-level
+  `<ErrorBoundary>` now carries a `key={route}` so that hash-route changes
+  unmount the old boundary and mount a fresh one. Without the key, the
+  same `<ErrorBoundary>` instance is reused across routes, and once it
+  captures an error its `hasError` state sticks even after the user
+  navigates away. The key only changes on `hashchange`, so unrelated
+  state updates (auth check, setup toast, etc.) do not remount the tree.
+
+`npx tsc --noEmit` + `npm run build` both clean. No changes to backend or
+to the Phase 5 robustness sweep itself.
+
 ## Open questions
 
 (filled in if anything needs Solomon's input)

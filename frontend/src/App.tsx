@@ -171,10 +171,18 @@ function App() {
     )
   }
 
-  // Docs are public - render before auth gate
+  // Docs are public - render before auth gate.
+  //
+  // Every <ErrorBoundary> below is keyed by `route` so that navigating
+  // between routes unmounts and remounts the boundary. Without the key,
+  // a captured error in one route's fallback would persist after the
+  // user navigates elsewhere (the boundary's `hasError` state is sticky
+  // across renders of the same instance). The `key` change forces a
+  // fresh boundary per route transition while leaving the rest of the
+  // app tree alone.
   if (route === '/docs' || route === 'docs') {
     return (
-      <ErrorBoundary label="Docs">
+      <ErrorBoundary key={route} label="Docs">
         <DocsPage />
       </ErrorBoundary>
     )
@@ -184,7 +192,7 @@ function App() {
 
   if (!isAuthenticated) {
     return (
-      <ErrorBoundary label="Login">
+      <ErrorBoundary key={route} label="Login">
         <LoginPage showInitialSetupMessage={initialSetupComplete} />
       </ErrorBoundary>
     )
@@ -197,7 +205,7 @@ function App() {
 
   if (route === '/history' || route === 'history') {
     return (
-      <ErrorBoundary label="History">
+      <ErrorBoundary key={route} label="History">
         <HistoryPage />
       </ErrorBoundary>
     )
@@ -205,7 +213,7 @@ function App() {
 
   if (route === '/settings' || route === 'settings') {
     return (
-      <ErrorBoundary label="Settings">
+      <ErrorBoundary key={route} label="Settings">
         <SettingsPage />
       </ErrorBoundary>
     )
@@ -215,14 +223,14 @@ function App() {
   if (route.startsWith('/cluster/')) {
     const clusterId = decodeURIComponent(route.substring('/cluster/'.length))
     return (
-      <ErrorBoundary label="Cluster detail">
+      <ErrorBoundary key={route} label="Cluster detail">
         <ClusterDetailRoute clusterId={clusterId} />
       </ErrorBoundary>
     )
   }
 
   return (
-    <ErrorBoundary label="Dashboard">
+    <ErrorBoundary key={route} label="Dashboard">
       {showSetupToast && (
         <div className="fixed top-4 right-4 z-50 rounded-lg border border-accent-cyan/40 bg-bg-secondary px-4 py-2 text-sm text-accent-cyan shadow-lg">
           Admin account configured.

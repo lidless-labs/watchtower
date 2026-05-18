@@ -72,6 +72,13 @@ function goBackToTopology() {
 
 export default function ClusterDetailPage({ clusterId }: ClusterDetailPageProps) {
   const topology = useNocStore((state) => state.topology)
+  // Cold loads of `#/cluster/:id` can fail before topology ever lands
+  // (backend down, network blip, 5xx). Without surfacing `error` /
+  // `isLoading` we'd render "Loading..." forever because `topology`
+  // stays null while `isLoading` flips false. Mirror the same error
+  // shape used by `Layout.tsx` so the two pages feel consistent.
+  const isLoading = useNocStore((state) => state.isLoading)
+  const error = useNocStore((state) => state.error)
 
   // Escape key returns to the tier view, matching the back button.
   useEffect(() => {
@@ -97,15 +104,49 @@ export default function ClusterDetailPage({ clusterId }: ClusterDetailPageProps)
     return { cluster, devices }
   }, [topology, clusterId])
 
-  if (!topology) {
+  // No topology yet + still loading -> spinner-equivalent text. This
+  // is the same observable behaviour as before for the happy path.
+  if (!topology && isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-bg-primary text-text-secondary text-sm">
-        Loading...
+        Loading topology...
       </div>
     )
   }
 
-  if (!found) {
+  // No topology + an error means the fetch failed. Surface the message
+  // with a retry + back-to-topology escape hatch. Styling matches the
+  // connection-error block in `Layout.tsx` so the two error states are
+  // visually consistent.
+  if (!topology && error) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-bg-primary">
+        <div className="text-center">
+          <div className="text-status-red text-xl mb-2">Connection Error</div>
+          <div className="text-text-secondary">{error}</div>
+          <div className="mt-4 flex items-center justify-center gap-2">
+            <button
+              onClick={() => window.location.reload()}
+              className="px-4 py-2 bg-bg-secondary border border-border-default rounded hover:bg-bg-tertiary transition-colors text-text-secondary"
+            >
+              Retry
+            </button>
+            <a
+              href="#/"
+              className="px-4 py-2 bg-bg-secondary border border-border-default rounded hover:bg-bg-tertiary transition-colors text-text-secondary"
+            >
+              Back to topology
+            </a>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // Topology loaded but the requested cluster isn't in it (deleted, bad
+  // URL, stale link). This was the original `!topology` branch's job;
+  // it now applies only when topology is present but lookup fails.
+  if (!topology || !found) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center gap-3 bg-bg-primary text-text-secondary">
         <div className="text-lg">Cluster not found</div>
