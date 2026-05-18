@@ -16,6 +16,35 @@ from .auth import UserRole, decode_token
 logger = logging.getLogger(__name__)
 
 
+# Maximum time we will wait, in seconds, for either:
+#   1. acquisition of `_Connection.send_lock` (a prior send/close still in flight), or
+#   2. completion of the network await it serializes (`send_json` or `close`).
+#
+# Bounding both halves of every send_lock-protected await keeps one stuck peer
+# from holding the lock indefinitely. The two failure modes that motivate this:
+#
+#   - `_revalidate_once` (JWT sweep): holding `send_lock` across `await
+#     websocket.close()` for one victim blocked the entire victim-close loop,
+#     so `revalidate_loop` never reached its next interval and every connected
+#     user's auth revalidation paused behind one dead peer.
+#   - `broadcast`: holding `send_lock` across `await send_json()` for one
+#     recipient blocked delivery to every recipient ordered after the stuck
+#     client in iteration order.
+#
+# 5s was picked deliberately:
+#   - well above normal network latency for a healthy client on a weak signal
+#     (mobile hand-off, brief packet loss) so a slow drainer doesn't get
+#     spuriously pruned;
+#   - well below the 60s sweep interval, so a stalled client can delay one
+#     sweep tick by no more than ~5s per victim, and broadcast by no more
+#     than ~5s per recipient, instead of unbounded.
+#
+# On timeout: broadcast prunes the recipient (peer is unhealthy, force-drop);
+# sweep logs and moves on (the victim is already gone from `_connections`, so
+# the stuck close frame buys nothing further).
+_SEND_TIMEOUT_SECONDS = 5.0
+
+
 # Per-role allowlist of broadcast message types. Admin and operator see the
 # full stream; viewer is restricted to non-sensitive device-status updates so
 # a JWT minted for a read-only user can't observe alert volume, recovery
@@ -143,27 +172,61 @@ class ConnectionManager:
             )
         if conn is None:
             return
+        # Bound both the lock acquisition and the send: a stuck peer must
+        # not be able to hold `send_lock` indefinitely (see
+        # `_SEND_TIMEOUT_SECONDS` for the rationale). Symmetric with
+        # `broadcast` and `_revalidate_once`.
         try:
-            async with conn.send_lock:
-                # Recheck membership: the revalidation sweep can drop this
-                # `_Connection` between releasing `self._lock` above and
-                # acquiring `send_lock` here, in which case the socket is
-                # either already closed or about to be. `send_lock` alone
-                # serializes against frame interleaving but does not stop
-                # us from emitting one final pong/greeting to a doomed
-                # peer; the explicit recheck does.
-                async with self._lock:
-                    if not any(c is conn for c in self._connections):
-                        return
-                await conn.websocket.send_json(message)
-        except (RuntimeError, WebSocketDisconnect):
-            # Starlette signals a closed/disconnected peer with these two:
-            # `RuntimeError` after the server side has already sent close,
-            # `WebSocketDisconnect` after the client tore down. Anything
-            # else (e.g. a TypeError from a stray non-serializable field
-            # slipping past the upfront validate) must propagate so we do
-            # not silently disconnect a healthy socket on a server bug.
+            await asyncio.wait_for(
+                conn.send_lock.acquire(), timeout=_SEND_TIMEOUT_SECONDS
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "send_personal: send_lock acquire timed out after %.1fs "
+                "(ws=%s, type=%s); dropping",
+                _SEND_TIMEOUT_SECONDS,
+                id(conn.websocket),
+                message.get("type"),
+            )
             await self.disconnect(websocket)
+            return
+        try:
+            # Recheck membership: the revalidation sweep can drop this
+            # `_Connection` between releasing `self._lock` above and
+            # acquiring `send_lock` here, in which case the socket is
+            # either already closed or about to be. `send_lock` alone
+            # serializes against frame interleaving but does not stop
+            # us from emitting one final pong/greeting to a doomed
+            # peer; the explicit recheck does.
+            async with self._lock:
+                if not any(c is conn for c in self._connections):
+                    return
+            try:
+                await asyncio.wait_for(
+                    conn.websocket.send_json(message),
+                    timeout=_SEND_TIMEOUT_SECONDS,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "send_personal: send_json timed out after %.1fs "
+                    "(ws=%s, type=%s); dropping",
+                    _SEND_TIMEOUT_SECONDS,
+                    id(conn.websocket),
+                    message.get("type"),
+                )
+                await self.disconnect(websocket)
+                return
+            except (RuntimeError, WebSocketDisconnect):
+                # Starlette signals a closed/disconnected peer with these two:
+                # `RuntimeError` after the server side has already sent close,
+                # `WebSocketDisconnect` after the client tore down. Anything
+                # else (e.g. a TypeError from a stray non-serializable field
+                # slipping past the upfront validate) must propagate so we do
+                # not silently disconnect a healthy socket on a server bug.
+                await self.disconnect(websocket)
+                return
+        finally:
+            conn.send_lock.release()
 
     async def broadcast(self, message: dict[str, Any]) -> None:
         """Broadcast a message to all connected clients whose role allows it.
@@ -203,23 +266,54 @@ class ConnectionManager:
 
         disconnected: list[WebSocket] = []
         for conn in recipients:
+            # Bound `send_lock` acquisition: a prior `send_json` or `close`
+            # stuck behind an unhealthy peer must not block delivery to
+            # every recipient ordered after it. See `_SEND_TIMEOUT_SECONDS`.
             try:
-                async with conn.send_lock:
-                    # Recheck membership: the revalidation sweep can drop
-                    # this `_Connection` between the recipient snapshot
-                    # above and acquiring `send_lock` here. Without this
-                    # recheck, broadcast still delivers one final message
-                    # to a connection whose token has just been
-                    # invalidated, which is a post-expiry auth leak (not
-                    # merely sloppy cleanup). Mirrors `send_personal`.
-                    async with self._lock:
-                        if not any(c is conn for c in self._connections):
-                            continue
-                    await conn.websocket.send_json(message)
-            except (RuntimeError, WebSocketDisconnect):
-                # Closed/disconnected peer. See send_personal for why these
-                # two and not a blanket Exception.
+                await asyncio.wait_for(
+                    conn.send_lock.acquire(), timeout=_SEND_TIMEOUT_SECONDS
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "broadcast: send_lock acquire timed out after %.1fs "
+                    "(ws=%s, type=%s); pruning recipient",
+                    _SEND_TIMEOUT_SECONDS,
+                    id(conn.websocket),
+                    message_type,
+                )
                 disconnected.append(conn.websocket)
+                continue
+            try:
+                # Recheck membership: the revalidation sweep can drop
+                # this `_Connection` between the recipient snapshot
+                # above and acquiring `send_lock` here. Without this
+                # recheck, broadcast still delivers one final message
+                # to a connection whose token has just been
+                # invalidated, which is a post-expiry auth leak (not
+                # merely sloppy cleanup). Mirrors `send_personal`.
+                async with self._lock:
+                    if not any(c is conn for c in self._connections):
+                        continue
+                try:
+                    await asyncio.wait_for(
+                        conn.websocket.send_json(message),
+                        timeout=_SEND_TIMEOUT_SECONDS,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "broadcast: send_json timed out after %.1fs "
+                        "(ws=%s, type=%s); pruning recipient",
+                        _SEND_TIMEOUT_SECONDS,
+                        id(conn.websocket),
+                        message_type,
+                    )
+                    disconnected.append(conn.websocket)
+                except (RuntimeError, WebSocketDisconnect):
+                    # Closed/disconnected peer. See send_personal for why
+                    # these two and not a blanket Exception.
+                    disconnected.append(conn.websocket)
+            finally:
+                conn.send_lock.release()
 
         if disconnected:
             await self._drop_websockets(disconnected)
@@ -376,14 +470,47 @@ async def _revalidate_once(manager: ConnectionManager) -> None:
     await manager._drop_websockets([conn.websocket for conn in victims])
 
     for conn in victims:
+        # Bound `send_lock` acquisition and the close await: a stuck peer
+        # must not be able to block the entire victim-close loop and stall
+        # `revalidate_loop` past its next interval. See
+        # `_SEND_TIMEOUT_SECONDS`. On timeout, just log and move on: the
+        # victim is already gone from `_connections` (so it can no longer
+        # receive broadcasts), and further close attempts won't unstick
+        # an ASGI send channel that's already wedged.
         try:
-            async with conn.send_lock:
-                await conn.websocket.close(code=_EXPIRED_CLOSE_CODE)
-        except Exception:
-            # Already-closed sockets raise here; nothing left to clean up
-            # because `_drop_websockets` above already removed every victim
-            # from `_connections`.
-            pass
+            await asyncio.wait_for(
+                conn.send_lock.acquire(), timeout=_SEND_TIMEOUT_SECONDS
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "revalidate sweep: send_lock acquire timed out after "
+                "%.1fs (ws=%s); victim already removed from manager, "
+                "skipping close",
+                _SEND_TIMEOUT_SECONDS,
+                id(conn.websocket),
+            )
+            continue
+        try:
+            try:
+                await asyncio.wait_for(
+                    conn.websocket.close(code=_EXPIRED_CLOSE_CODE),
+                    timeout=_SEND_TIMEOUT_SECONDS,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "revalidate sweep: close() timed out after %.1fs "
+                    "(ws=%s); victim already removed from manager, "
+                    "moving on",
+                    _SEND_TIMEOUT_SECONDS,
+                    id(conn.websocket),
+                )
+            except Exception:
+                # Already-closed sockets raise here; nothing left to clean
+                # up because `_drop_websockets` above already removed every
+                # victim from `_connections`.
+                pass
+        finally:
+            conn.send_lock.release()
 
 
 async def revalidate_loop(

@@ -24,6 +24,7 @@ from typing import Any
 import pytest
 from starlette.websockets import WebSocketState
 
+from app import websocket as ws_module
 from app.auth import UserRole
 from app.websocket import ConnectionManager, _Connection, _revalidate_once
 
@@ -655,3 +656,88 @@ async def test_broadcast_during_slow_send_does_not_block_revalidation_sweep():
     finally:
         blocking.release.set()
         await broadcast_task
+
+
+async def test_broadcast_skips_stuck_recipient_within_timeout(monkeypatch):
+    """A `send_json` that never returns must not block delivery to others.
+
+    The fix (#24) wraps `send_json` in `asyncio.wait_for` at
+    `_SEND_TIMEOUT_SECONDS`. We patch the constant down to 0.1s so the
+    timeout fires fast, register one stuck and one healthy recipient,
+    and assert:
+
+      1. broadcast completes within roughly the timeout window (not
+         hanging forever behind the stuck peer);
+      2. the healthy recipient still received the message;
+      3. the stuck recipient is dropped from `_connections` by the
+         timeout-triggered prune path.
+
+    Iteration order matters: the stuck peer must be visited first so
+    a pre-fix impl would hang before reaching the healthy one.
+    """
+    monkeypatch.setattr(ws_module, "_SEND_TIMEOUT_SECONDS", 0.1)
+
+    manager = ConnectionManager()
+    blocking = _BlockingFakeWS()
+    healthy = _FastFakeWS()
+    _attach(manager, blocking, UserRole.ADMIN.value)
+    _attach(manager, healthy, UserRole.ADMIN.value)
+
+    message = {"type": "device_status_change", "id": 1}
+    try:
+        # Generous upper bound: the timeout is 0.1s, healthy send is
+        # immediate, so 1.0s leaves room for scheduler jitter while
+        # still catching an unbounded hang.
+        await asyncio.wait_for(manager.broadcast(message), timeout=1.0)
+    except asyncio.TimeoutError:  # pragma: no cover - failure path
+        pytest.fail(
+            "broadcast did not return within the timeout window; "
+            "stuck recipient is holding send_lock unbounded"
+        )
+    finally:
+        blocking.release.set()
+
+    assert healthy.received == [message], (
+        "broadcast must still deliver to healthy recipients while pruning "
+        "the stuck one"
+    )
+    assert manager.connection_count == 1
+    assert manager.active_connections == [healthy], (
+        "stuck recipient must be dropped from _connections after the "
+        "send_json timeout fires"
+    )
+
+
+async def test_broadcast_timeout_releases_send_lock_for_followups(monkeypatch):
+    """After a recipient times out, its `send_lock` must be released.
+
+    If broadcast's timeout-path bailed without releasing the lock, a
+    subsequent `send_personal` (e.g. a pong) on the same connection
+    would block forever on `send_lock.acquire`. We construct that
+    sequence and assert the second send completes promptly.
+
+    The stuck connection itself has been pruned by the first broadcast,
+    so the second send returns silently (no `_Connection` registered).
+    The test guards against the regression where `acquire()` succeeded
+    but the timeout escape skipped `release()`.
+    """
+    monkeypatch.setattr(ws_module, "_SEND_TIMEOUT_SECONDS", 0.1)
+
+    manager = ConnectionManager()
+    blocking = _BlockingFakeWS()
+    _attach(manager, blocking, UserRole.ADMIN.value)
+    conn = manager._connections[0]
+
+    try:
+        await asyncio.wait_for(
+            manager.broadcast({"type": "device_status_change"}),
+            timeout=1.0,
+        )
+    finally:
+        blocking.release.set()
+
+    # After timeout-prune the connection's send_lock should be free.
+    assert not conn.send_lock.locked(), (
+        "broadcast leaked send_lock on timeout-prune path; subsequent "
+        "operations on this connection would deadlock"
+    )
