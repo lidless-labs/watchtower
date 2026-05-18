@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import { ReactFlowProvider } from '@xyflow/react'
 import Layout from './components/Layout/Layout'
 import ToastContainer from './components/Alerts/ToastContainer'
 import CriticalOverlay from './components/Alerts/CriticalOverlay'
@@ -110,19 +109,18 @@ function DashboardApp() {
   useDashboardData()
 
   return (
-    <ReactFlowProvider>
+    <>
       <Layout />
       <ToastContainer />
       <CriticalOverlay />
       <GuidedTourAutoStart />
-    </ReactFlowProvider>
+    </>
   )
 }
 
 /**
  * Wrapper for the `#/cluster/:id` route. Reuses the dashboard's data
- * loader so the topology is available, but deliberately skips
- * `ReactFlowProvider` - the detail page is plain HTML, not a canvas.
+ * loader so the topology is available. Plain HTML page - no canvas.
  * Toasts + critical overlay still mount so alerts surface here too.
  */
 function ClusterDetailRoute({ clusterId }: { clusterId: string }) {

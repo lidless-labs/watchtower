@@ -46,7 +46,7 @@ backend issue #24 (websocket send_lock timeout).
 | 1 - TopologyTiers | completed | `feat/topology-tiers` | TBD | New `<TopologyTiers />` component + Layout.tsx default-branch swap |
 | 2 - drill-in routing | completed | `feat/cluster-drill-in` | TBD | New `<ClusterDetailPage />` + `#/cluster/:id` route + `useDashboardData` hook extracted from `DashboardApp` |
 | 3 - issue #24 fix | completed | `fix/websocket-send-lock-timeout` | TBD | Parallel with Phase 1, backend-only. Bounds `send_lock` acquire + `send_json`/`close` await with 5s timeout across `broadcast`, `_revalidate_once`, and `send_personal` |
-| 4 - cleanup | pending | - | - | Deletes ~2000 lines of canvas code + 2 deps |
+| 4 - cleanup | completed | `chore/delete-legacy-canvas` | TBD | Deletes ~2000 lines of canvas code + 3 deps (`@xyflow/react`, `@dagrejs/dagre`, `mermaid`) |
 | 5 - robustness sweep | pending | - | - | Audit nocStore / polling / error boundaries |
 
 ## Deviations / tradeoffs
@@ -187,6 +187,55 @@ backend issue #24 (websocket send_lock timeout).
   Out of scope for drill-in; can be revisited in Phase 5's robustness sweep if useful.
 - `npm run lint` still broken (same Phase 0 root cause). `npx tsc --noEmit` and
   `npm run build` both pass clean on this branch.
+
+### Phase 4
+
+- Deleted `frontend/src/components/Canvas/` (TopologyCanvas.tsx, MermaidModal.tsx,
+  edges/, nodes/) and `frontend/src/utils/dagreLayout.ts`. Verified beforehand
+  that nothing outside `Canvas/` imported from either - only Layout.tsx held a
+  reference to `TopologyCanvas`, which got swapped for unconditional
+  `<TopologyTiers />` render.
+- Removed `?legacy=1` hash parsing and the `useLegacyTopologyFlag` hook from
+  `Layout.tsx`. The conditional that gated canvas-vs-tiers is gone; tier view
+  is the only render path now.
+- Removed `ReactFlowProvider` wrap + import from `App.tsx`. `DashboardApp`
+  returns a fragment now; nothing in the tree consumes React Flow context
+  anymore.
+- Kept `data-tour="topology-canvas"` on the Layout `<main>` rather than
+  renaming to `topology-tiers`. Rationale: the selector lives in
+  GuidedTour.tsx as a string literal and would force a coordinated rename
+  across any external docs/screenshots that reference it. The attribute is a
+  hook-name, not a description of the underlying widget.
+- Rewrote the `device-node` GuidedTour step as `cluster-card` and added a
+  matching `data-tour="cluster-card"` attribute to ClusterCard in
+  TopologyTiers.tsx. driver.js highlights the first match; cluster cards are
+  the new top-level interactive unit, so the tour story now reads
+  "topology -> cluster -> sidebar -> port grid -> alerts -> speedtest ->
+  summary" without a dead step.
+- `nocStore.ts` cleanup:
+  - **Deleted** `detailPanelClusterId`, `expandedClusters`, `toggleClusterExpanded`,
+    `hoveredEdgeId`, `setHoveredEdge`. All five were only read/written by code
+    inside `Canvas/` (verified by grep before deletion). `openClusterDetail` /
+    `closeClusterDetail` are now pure hash-routing helpers - the parallel
+    in-store `detailPanelClusterId` slot the legacy sidebar consumed is gone.
+  - **Kept** `viewMode`, `l3Topology`, `selectedVlans`, `setViewMode`,
+    `setL3Topology`, `toggleVlanFilter`, `clearVlanFilter`. The brief
+    explicitly said to keep them if they belong to the L3 topology feature
+    rather than the canvas. They have an independent API endpoint
+    (`/api/topology/l3` in `endpoints.ts`) and an independent type module
+    (`types/vlan.ts`); the canvas was just their first consumer. A future L3
+    view can wire them in without re-introducing the slots. Documented as a
+    block comment in `nocStore.ts` so the next reader knows why dead-looking
+    state is intentionally still there.
+- Removed `@xyflow/react`, `@dagrejs/dagre`, and `mermaid` from
+  `frontend/package.json` dependencies. Verified mermaid was only used by
+  the deleted `MermaidModal.tsx` (`grep -rn "from.*['\"]mermaid['\"]" src`
+  returned zero hits after deletion). Regenerated `package-lock.json` from
+  scratch.
+- `npm run lint` still broken (same Phase 0 root cause). `npx tsc --noEmit`
+  and `npm run build` both pass clean on this branch (build output:
+  2670 modules, ~805 kB main bundle, down meaningfully from the React Flow
+  era).
 
 ## Open questions
 

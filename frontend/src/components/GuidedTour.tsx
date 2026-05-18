@@ -51,18 +51,18 @@ const TOUR_STEPS: TourStep[] = [
   {
     element: '[data-tour="topology-canvas"]',
     popover: {
-      title: '🗺️ Topology Canvas',
+      title: '🗺️ Network Topology',
       description:
-        'This is your network topology view. Drag to pan, scroll to zoom, and click devices to inspect them. Toggle between L2 (physical) and L3 (VLAN) views.',
+        'This is your network topology view. Clusters are grouped into tier swimlanes (cloud at the top, leaf access/wireless at the bottom). Click a cluster to inspect it; double-click or press Enter to drill into device-level detail.',
       position: 'bottom',
     },
   },
   {
-    element: '[data-tour="device-node"]',
+    element: '[data-tour="cluster-card"]',
     popover: {
-      title: '🖥️ Device Nodes',
+      title: '🧩 Cluster Cards',
       description:
-        'Each node represents a network device — switches, firewalls, servers, and access points. The colored ring indicates status: green = up, red = down, yellow = degraded.',
+        'Each card represents a cluster of devices. The colored dot indicates rolled-up status: green = all up, red = at least one down, yellow = degraded. Double-click to open the cluster detail page.',
       position: 'right',
     },
   },
