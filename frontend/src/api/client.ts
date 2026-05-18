@@ -3,8 +3,15 @@ import { useAuthStore } from '../store/authStore'
 
 const API_BASE = '/api'
 
+// Axios' default is no timeout, so a stuck request (server hung, LB
+// black hole, dropped packets) will sit pending forever and freeze any
+// UI affordance waiting on it. 30s is generous for our longest endpoint
+// (history backfills) and tight enough to surface real outages.
+const REQUEST_TIMEOUT_MS = 30_000
+
 export const apiClient = axios.create({
   baseURL: API_BASE,
+  timeout: REQUEST_TIMEOUT_MS,
   headers: {
     'Content-Type': 'application/json',
   },

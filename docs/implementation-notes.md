@@ -47,7 +47,7 @@ backend issue #24 (websocket send_lock timeout).
 | 2 - drill-in routing | completed | `feat/cluster-drill-in` | TBD | New `<ClusterDetailPage />` + `#/cluster/:id` route + `useDashboardData` hook extracted from `DashboardApp` |
 | 3 - issue #24 fix | completed | `fix/websocket-send-lock-timeout` | TBD | Parallel with Phase 1, backend-only. Bounds `send_lock` acquire + `send_json`/`close` await with 5s timeout across `broadcast`, `_revalidate_once`, and `send_personal` |
 | 4 - cleanup | completed | `chore/delete-legacy-canvas` | TBD | Deletes ~2000 lines of canvas code + 3 deps (`@xyflow/react`, `@dagrejs/dagre`, `mermaid`) |
-| 5 - robustness sweep | pending | - | - | Audit nocStore / polling / error boundaries |
+| 5 - robustness sweep | completed | `chore/robustness-sweep` | TBD | 5 inline fixes (error boundary, ws backoff/4001, axios timeout, fetchJson AbortController, delete dead mock_data.py) + 3 issues filed (#33 nocStore race, #34 polling visibility/backoff, #35 axios vs fetchJson) |
 
 ## Deviations / tradeoffs
 
@@ -236,6 +236,91 @@ backend issue #24 (websocket send_lock timeout).
   and `npm run build` both pass clean on this branch (build output:
   2670 modules, ~805 kB main bundle, down meaningfully from the React Flow
   era).
+
+### Phase 5
+
+Robustness sweep across the codebase looking for the classes of bug a websocket
++ polling app accumulates: missing error boundaries, leaking websocket
+reconnects, untimed network calls, stale dead code. Aimed for "fix the surgical
+high-confidence findings, file the rest". Five fixes inline, three issues filed.
+
+**Fixed inline:**
+
+- `frontend/src/components/common/ErrorBoundary.tsx` (new file) + every
+  top-level route in `App.tsx` wrapped. A throw in `TopologyTiers`,
+  `ClusterDetailPage`, or any settings tab now renders a friendly reload card
+  rather than blanking the whole tab. The boundary catches render-phase throws
+  only; async promise rejections still need per-call-site handling, which is
+  what the existing try/catch in `useDashboardData` already does.
+- `frontend/src/hooks/useWebSocket.ts` (rewrite). The old code reconnected on a
+  fixed 3s timer with no cap, no jitter, and no handling of the JWT-rejected
+  close code. New behaviour: exponential backoff 1s → 30s with 0-500ms jitter,
+  and an explicit branch on close code 4001 (the code `backend/app/websocket.py`
+  emits when the JWT auth handshake fails or a session is revalidated out)
+  that calls `handleAuthError()` instead of reconnecting. Also nullifies
+  `onclose` / `onopen` / `onerror` / `onmessage` before calling `socket.close()`
+  in `disconnect()` so the stale handlers cannot re-arm the reconnect timer
+  after the component has unmounted.
+- `frontend/src/api/client.ts` - added `timeout: 30_000` to the axios instance.
+  Default is no timeout, so a stuck request would hang the in-flight promise
+  forever. 30s matches the longest expected backend response (history
+  backfills) and surfaces real outages.
+- `frontend/src/api/endpoints.ts` - wrapped `fetchJson` in an `AbortController`
+  with a 30s timeout. Same rationale as axios; raw `fetch()` also has no
+  default timeout. The controller respects a caller-supplied `init.signal`
+  (so component-unmount cancellation still works) and clears the timer in a
+  `finally` so we don't leak timers on successful responses.
+- `backend/app/mock_data.py` deleted. Grep across the entire repo found zero
+  importers - the file was orphaned when demo mode was removed in PR #27.
+  302 lines of dead code.
+
+**Filed as issues:**
+
+- #33 - nocStore race: REST topology snapshot can overwrite a concurrent
+  websocket `device_status_change` update. Real bug, but the fix shape needs
+  a design decision (generation counter vs pending-updates buffer vs
+  server-stamped sequence numbers). Not surgical.
+- #34 - Polling widgets keep firing when the tab is hidden + no exponential
+  back-off on persistent failure. Touches six widget files plus `useAlerts.ts`;
+  cleanest shape is a new shared `usePollingInterval` hook. Out of scope for
+  inline fixing - flagged for design + one-PR refactor.
+- #35 - `apiClient` (axios) and `fetchJson` (raw fetch) divergence. 401
+  responses on `fetchJson` paths don't route through `handleAuthError`, so a
+  mid-session JWT expiry on `/api/topology` shows a stale dashboard instead of
+  bouncing to login. The fix is a real consolidation, not a one-line patch;
+  filing for design.
+
+**Findings explicitly NOT addressed:**
+
+- Backend `httpx` timeouts. Audited every call site (`backend/app/polling/{librenms,proxmox,netdisco}.py`,
+  `backend/app/routers/settings.py`, `backend/app/services/notification_service.py`).
+  All are already bounded with 10s or 30s timeouts. No fix needed.
+- Backend `AsyncIOScheduler` resilience. `backend/app/polling/scheduler.py`
+  wraps every `poll_*` in try/except so one failing collector cannot kill the
+  whole loop. `poll_now()` uses `asyncio.gather(..., return_exceptions=True)`.
+  Already correct - no fix needed.
+- Rate-limiter fail-closed behaviour (`backend/app/ratelimit.py`). PR #18
+  already added the per-worker in-memory fallback. Reviewed and confirmed:
+  on Redis failure the limiter falls back to per-worker buckets, NOT
+  fails-open. No fix needed.
+- Backend role-gating coverage. `backend/app/main.py` applies
+  `Depends(get_current_user)` (read routers) or `Depends(require_admin)`
+  (admin routers) at the router-inclusion level rather than per-route.
+  Routers that look "uncovered" by grep are gated at the include site.
+  Spot-checked the include list - every router is gated. No leak.
+- React form-validation skim of `components/Settings/`. Did not find any
+  obviously "submit with no required-field check" pattern beyond what the
+  HTML `required` attribute or button-disabled state already covers. Not
+  worth a deeper audit without a concrete reported bug.
+
+**Build / test pass:**
+
+- `npx tsc --noEmit` clean.
+- `npm run build` clean (807 kB main bundle, +2 kB from the ErrorBoundary).
+- `pytest -x` clean (73 passed, 4 skipped - the four Redis-integration tests
+  that require a real Redis to be running, which is expected).
+- `npm run lint` still broken on the same pre-existing eslint config gap
+  noted in Phase 0. Out of scope.
 
 ## Open questions
 
