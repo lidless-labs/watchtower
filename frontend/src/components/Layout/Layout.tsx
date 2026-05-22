@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import Header from './Header'
 import Sidebar from './Sidebar'
 import TopologyCanvas from '../Canvas/TopologyCanvas'
+import TopologyTiers from '../Topology/TopologyTiers'
 import { useNocStore } from '../../store/nocStore'
 
 /**
@@ -70,8 +71,7 @@ export default function Layout() {
             // Legacy React Flow canvas, reachable via `#/?legacy=1`. Will be deleted in Phase 4.
             <TopologyCanvas />
           ) : (
-            // TODO(phase-1): replace with <TopologyTiers /> when Phase 1 lands
-            <TopologyCanvas />
+            <TopologyTiers />
           )}
         </main>
 
