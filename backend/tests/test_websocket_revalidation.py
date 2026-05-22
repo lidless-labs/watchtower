@@ -212,3 +212,136 @@ async def test_outer_loop_catch_all_keeps_task_alive(monkeypatch):
 
     assert calls == [1, 2], "second tick must run even after the first raised"
     assert sleeps == [1, 2, 3]
+
+
+async def test_sweep_completes_within_timeout_on_stuck_close(monkeypatch):
+    """A stuck `websocket.close()` must not block the victim-close loop.
+
+    Pre-fix (#24), `_revalidate_once` held the victim's `send_lock`
+    across an unbounded `await websocket.close(...)`. One peer that
+    failed to drain its ASGI send channel froze the entire sweep,
+    so `revalidate_loop` never reached its next interval and every
+    other user's auth re-validation paused behind one bad client.
+
+    The fix wraps the close in `asyncio.wait_for(...)` at
+    `_SEND_TIMEOUT_SECONDS`. We patch the constant down to 0.1s and
+    register two victims: the first hangs in `close()`, the second
+    closes cleanly. Sweep must complete within the timeout window
+    AND still progress to the second victim.
+    """
+
+    class _StuckCloseWS:
+        def __init__(self) -> None:
+            self.close_started = asyncio.Event()
+            self.release = asyncio.Event()
+
+        @property
+        def application_state(self) -> WebSocketState:
+            return WebSocketState.CONNECTED
+
+        async def close(self, code: int) -> None:
+            self.close_started.set()
+            await self.release.wait()
+
+    class _RecordingWS:
+        def __init__(self) -> None:
+            self.closed_with: int | None = None
+
+        @property
+        def application_state(self) -> WebSocketState:
+            return WebSocketState.CONNECTED
+
+        async def close(self, code: int) -> None:
+            self.closed_with = code
+
+    monkeypatch.setattr(ws_module, "_SEND_TIMEOUT_SECONDS", 0.1)
+
+    manager = ConnectionManager()
+    stuck = _StuckCloseWS()
+    healthy_victim = _RecordingWS()
+    # Both have expired tokens so both land on the victim list. The
+    # stuck one is iterated first, ensuring the pre-fix bug would
+    # block the entire loop before reaching the healthy victim.
+    _attach(
+        manager,
+        stuck,
+        UserRole.ADMIN.value,
+        _mint(UserRole.ADMIN.value, exp_offset_seconds=-60),
+    )
+    _attach(
+        manager,
+        healthy_victim,
+        UserRole.ADMIN.value,
+        _mint(UserRole.ADMIN.value, exp_offset_seconds=-60),
+    )
+
+    try:
+        # Upper bound generously above the 0.1s per-call timeout so a
+        # working impl doesn't trip the assertion on scheduler jitter,
+        # but tight enough to catch unbounded hangs.
+        await asyncio.wait_for(_revalidate_once(manager), timeout=1.0)
+    except asyncio.TimeoutError:  # pragma: no cover - failure path
+        pytest.fail(
+            "_revalidate_once did not return within the timeout window; "
+            "stuck close() is blocking the victim-close loop"
+        )
+    finally:
+        stuck.release.set()
+
+    # Sweep removed both victims from `_connections` BEFORE awaiting close
+    # (see `_drop_websockets` call ordering). That contract holds even
+    # for the stuck peer.
+    assert manager.connection_count == 0, (
+        "both victims must be removed from the manager regardless of "
+        "whether their close() completed"
+    )
+    # And the healthy victim still got its close() call, proving the
+    # sweep iterated past the stuck one.
+    assert healthy_victim.closed_with == _EXPIRED_CLOSE_CODE, (
+        "sweep must proceed to subsequent victims after a stuck peer's "
+        "close() times out"
+    )
+
+
+async def test_sweep_releases_send_lock_on_close_timeout(monkeypatch):
+    """The stuck victim's `send_lock` must be released after the timeout.
+
+    A leaked `send_lock` on the timeout escape would deadlock any
+    further attempt to send on that connection (e.g. a stray
+    `send_personal` arriving in the same tick before cleanup
+    completes). The connection is gone from `_connections` so
+    practical impact is small, but the leak is a latent footgun.
+    """
+
+    class _StuckCloseWS:
+        def __init__(self) -> None:
+            self.release = asyncio.Event()
+
+        @property
+        def application_state(self) -> WebSocketState:
+            return WebSocketState.CONNECTED
+
+        async def close(self, code: int) -> None:
+            await self.release.wait()
+
+    monkeypatch.setattr(ws_module, "_SEND_TIMEOUT_SECONDS", 0.1)
+
+    manager = ConnectionManager()
+    stuck = _StuckCloseWS()
+    _attach(
+        manager,
+        stuck,
+        UserRole.ADMIN.value,
+        _mint(UserRole.ADMIN.value, exp_offset_seconds=-60),
+    )
+    conn = manager._connections[0]
+
+    try:
+        await asyncio.wait_for(_revalidate_once(manager), timeout=1.0)
+    finally:
+        stuck.release.set()
+
+    assert not conn.send_lock.locked(), (
+        "sweep leaked send_lock on close() timeout; subsequent operations "
+        "on this connection would deadlock"
+    )
