@@ -20,11 +20,9 @@ import type { Connection, ConnectionStatus, ExternalLink } from '../../types/con
 
 /**
  * Rank values for the tier swimlanes. Lower rank = higher on the page
- * (cloud at top, leaf servers/wireless at bottom). Mirrors the map used
- * by the legacy dagre layout (`utils/dagreLayout.ts`) so the new view
- * matches the muscle memory of the old one. We keep a local copy here
- * rather than re-exporting from dagreLayout.ts because Phase 4 will
- * delete that file entirely.
+ * (cloud at top, leaf servers/wireless at bottom). Carried over from
+ * the legacy dagre layout (deleted in Phase 4) so the new view matches
+ * the muscle memory of the old canvas.
  */
 const RANK_ORDER: Record<string, number> = {
   cloud: 0,
@@ -62,7 +60,7 @@ const RANK_LABEL: Record<number, string> = {
 const OTHER_RANK = 999
 
 /**
- * Map cluster.cluster_type to a tier rank. Same logic as
+ * Map cluster.cluster_type to a tier rank. Same logic as the now-deleted
  * `dagreLayout.getClusterRank` but returns OTHER_RANK instead of a
  * silent "distribution" default so unknown types are visible to the
  * reader (and to whoever is debugging the topology feed).
@@ -363,6 +361,7 @@ function ClusterCard({ entry, onSelect, onDrillIn, registerRef }: ClusterCardPro
       onDoubleClick={() => onDrillIn(entry)}
       onKeyDown={handleKeyDown}
       data-cluster-id={entry.cluster.id}
+      data-tour="cluster-card"
       className="bg-bg-secondary border border-border-default rounded-md p-3 min-w-[180px] max-w-[220px] cursor-pointer hover:border-accent-cyan transition-colors focus:outline-none focus:ring-2 focus:ring-accent-cyan"
     >
       <div className="flex items-start gap-2">
