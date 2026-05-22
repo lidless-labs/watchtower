@@ -44,7 +44,7 @@ backend issue #24 (websocket send_lock timeout).
 |-------|--------|--------|-----|-------|
 | 0 - legacy flag | completed | `feat/topology-legacy-flag` | TBD | Layout.tsx only - App.tsx already had the route-side hash reader, no changes needed there |
 | 1 - TopologyTiers | completed | `feat/topology-tiers` | TBD | New `<TopologyTiers />` component + Layout.tsx default-branch swap |
-| 2 - drill-in routing | pending | - | - | Reuses ProxmoxPanel/PortGrid/VMList |
+| 2 - drill-in routing | completed | `feat/cluster-drill-in` | TBD | New `<ClusterDetailPage />` + `#/cluster/:id` route + `useDashboardData` hook extracted from `DashboardApp` |
 | 3 - issue #24 fix | completed | `fix/websocket-send-lock-timeout` | TBD | Parallel with Phase 1, backend-only. Bounds `send_lock` acquire + `send_json`/`close` await with 5s timeout across `broadcast`, `_revalidate_once`, and `send_personal` |
 | 4 - cleanup | pending | - | - | Deletes ~2000 lines of canvas code + 2 deps |
 | 5 - robustness sweep | pending | - | - | Audit nocStore / polling / error boundaries |
@@ -137,6 +137,54 @@ backend issue #24 (websocket send_lock timeout).
 - Tour anchor kept as `data-tour="topology-canvas"` on the same `<main>` element in
   Layout.tsx so the existing GuidedTour selector keeps working. Renaming would have
   required either touching GuidedTour.tsx (out of scope) or duplicating the attribute.
+- `npm run lint` still broken (same Phase 0 root cause). `npx tsc --noEmit` and
+  `npm run build` both pass clean on this branch.
+
+### Phase 2
+
+- `openClusterDetail` now performs hash navigation (`window.location.hash = `#/cluster/${id}``)
+  in addition to setting the in-store `detailPanelClusterId` slot. Kept the slot write
+  for backward compatibility with the `?legacy=1` canvas - the legacy sidebar still
+  reads from it. Phase 4 will remove the slot when the canvas dies. `closeClusterDetail`
+  symmetrically navigates back to `#/` when the current hash is a cluster route, so the
+  legacy sidebar X button + escape handlers both route correctly.
+- Extracted a `useDashboardData()` hook from `DashboardApp` so both the dashboard route
+  and the new `ClusterDetailRoute` wrapper share topology + speedtest fetching plus the
+  websocket subscription. Without this, opening `#/cluster/:id` after a hard refresh
+  would render "Loading..." forever because nothing fetches topology on that route.
+- `ClusterDetailPage` deliberately does NOT mount `<ReactFlowProvider>` (brief explicitly
+  called this out - the detail page is plain HTML, no canvas). It does mount
+  `<ToastContainer />` + `<CriticalOverlay />` so alerts still surface here. Skipped
+  `<GuidedTourAutoStart />` - the tour anchors live on the tier view, not the detail
+  page, so re-running it from here would land on stale selectors.
+- Cluster-type variant routing (case-insensitive substring on `cluster.cluster_type`):
+  - `proxmox` / `server` / `vm` -> stack `<ProxmoxPanel nodeName=device.display_name />`
+    for each device with `proxmox_stats`; falls back to all devices if none have the
+    stats block (so cluster_type wins over device flags for the dispatch decision).
+    ProxmoxPanel self-fetches on a 30s interval; one panel per node.
+  - `switch` / `access` / `distribution` -> render `<PortGrid>` for each switch device.
+    Mirror header above each grid shows ports up/down from `switch_stats`. Falls back
+    to all devices if none have `device_type === 'switch'`.
+  - `firewall` -> inline summary card with `firewall_stats` (sessions / in / out)
+    rather than the full `DeviceCard`. Brief allowed either; the inline summary keeps
+    the firewall view scannable and avoids the sidebar-shaped close button (DeviceCard
+    has a "clear selection" X that's meaningless here).
+  - default -> `<DeviceCard>` per device. The DeviceCard close button clears
+    `selectedDevice` in the store; harmless on this page because the sidebar isn't
+    mounted, so the action is a no-op visually.
+- Back-button behaviour: three paths, all hash-driven so the browser back button works
+  automatically via `useHashRoute`:
+  1. Top-left back arrow + "Back to topology" button -> `<a href="#/">`.
+  2. Escape key -> `keydown` listener sets `window.location.hash = '#/'`.
+  3. `useNocStore.closeClusterDetail()` -> same hash assignment, guards against
+     wiping the hash from non-cluster routes.
+- "Cluster not found" state shows when the topology is loaded but the id is missing.
+  "Loading..." renders while topology is null (e.g. cold load + direct link to a
+  cluster route).
+- Status aggregation: cluster status = worst-of(device statuses). `down > degraded > up >
+  unknown`. Matches the per-cluster status pill on the tier cards from Phase 1.
+- Skipped the optional `Sidebar.tsx` widget promotion (NetworkSummary on the tier view).
+  Out of scope for drill-in; can be revisited in Phase 5's robustness sweep if useful.
 - `npm run lint` still broken (same Phase 0 root cause). `npx tsc --noEmit` and
   `npm run build` both pass clean on this branch.
 

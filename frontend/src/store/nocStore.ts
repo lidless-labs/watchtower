@@ -175,8 +175,26 @@ export const useNocStore = create<NocState>((set, get) => ({
   setSpeedtestStatus: (speedtestStatus) => set({ speedtestStatus }),
 
   // Detail panel actions
-  openClusterDetail: (clusterId) => set({ detailPanelClusterId: clusterId }),
-  closeClusterDetail: () => set({ detailPanelClusterId: null }),
+  //
+  // openClusterDetail now drives hash navigation to the dedicated
+  // #/cluster/:id page. The legacy in-store `detailPanelClusterId`
+  // slot is kept in sync so the legacy canvas sidebar still has
+  // something to read while Phase 0's `?legacy=1` escape hatch is live;
+  // Phase 4 will delete that slot along with the canvas. Calling
+  // closeClusterDetail from anywhere - tier card, legacy sidebar X
+  // button, escape handler - routes back to `#/`.
+  openClusterDetail: (clusterId) => {
+    if (typeof window !== 'undefined') {
+      window.location.hash = `#/cluster/${encodeURIComponent(clusterId)}`
+    }
+    set({ detailPanelClusterId: clusterId })
+  },
+  closeClusterDetail: () => {
+    if (typeof window !== 'undefined' && window.location.hash.startsWith('#/cluster/')) {
+      window.location.hash = '#/'
+    }
+    set({ detailPanelClusterId: null })
+  },
 
   // Edge hover actions
   setHoveredEdge: (edgeId) => set({ hoveredEdgeId: edgeId }),
