@@ -43,7 +43,7 @@ backend issue #24 (websocket send_lock timeout).
 | Phase | Status | Branch | PR | Notes |
 |-------|--------|--------|-----|-------|
 | 0 - legacy flag | completed | `feat/topology-legacy-flag` | TBD | Layout.tsx only - App.tsx already had the route-side hash reader, no changes needed there |
-| 1 - TopologyTiers | pending | - | - | New component, blocks Phase 2 |
+| 1 - TopologyTiers | completed | `feat/topology-tiers` | TBD | New `<TopologyTiers />` component + Layout.tsx default-branch swap |
 | 2 - drill-in routing | pending | - | - | Reuses ProxmoxPanel/PortGrid/VMList |
 | 3 - issue #24 fix | completed | `fix/websocket-send-lock-timeout` | TBD | Parallel with Phase 1, backend-only. Bounds `send_lock` acquire + `send_json`/`close` await with 5s timeout across `broadcast`, `_revalidate_once`, and `send_personal` |
 | 4 - cleanup | pending | - | - | Deletes ~2000 lines of canvas code + 2 deps |
@@ -100,6 +100,45 @@ backend issue #24 (websocket send_lock timeout).
 - `asyncio.CancelledError` is allowed to propagate from `wait_for`. The outer
   `revalidate_loop` and `websocket_endpoint` are the cancellation owners; the
   per-call timeout layer must not swallow shutdown signals.
+
+### Phase 1
+
+- Copied `RANK_ORDER` + `getClusterRank` logic into `TopologyTiers.tsx` rather than
+  importing from `utils/dagreLayout.ts`. Phase 4 will delete `dagreLayout.ts` outright;
+  duplicating the small map now keeps the new component standalone and avoids a future
+  rename-or-move shuffle. The brief allowed either copy or re-export.
+- Unknown cluster types bucket into a final "Other" lane (rank `999`) instead of being
+  silently re-bucketed to `distribution` like the dagre layout did. Visible mis-typing
+  beats invisible mis-categorization; we'd rather the operator notice a typo in
+  `cluster_type` than wonder why a server is showing up under "distribution".
+- Edge collapsing: multiple connections between the same two clusters render as a single
+  line per pair. The worst status wins (`down > degraded > unknown > up`). Dense
+  topologies would otherwise produce 6-12 overlapping lines per pair with the same
+  endpoints; collapsing keeps the overlay readable. We lose the count of redundant
+  links, but the user can still see all of them in the per-cluster drill-in (Phase 2).
+- External links render as dedicated cards in a dedicated "External" lane pinned to the
+  top of the page. The brief suggested a virtual "Internet" node; we generalized to
+  one card per distinct external target label so multiple ISPs / IXes / clouds each
+  get their own anchor. Edges to external cards use a dashed stroke to differentiate
+  from intra-fabric links.
+- Edges drawn with simple `<line>` elements (straight, card-center to card-center).
+  No bezier routing, no anchor-edge attachment, no collision avoidance. The brief
+  explicitly allowed line OR path; straight lines keep the SVG cheap and Phase 5
+  can revisit if the visual overlap gets bad in real-world topology sizes.
+- Single-click selects `cluster.devices[0]` (mirrors the legacy canvas behaviour so the
+  sidebar shows something useful), double-click + Enter/Space call
+  `openClusterDetail(cluster.id)`. The store action exists already; Phase 2 will wire
+  it into hash routing.
+- Card refs registered via a `useRef<Map>` keyed by cluster id, measured in a
+  `useLayoutEffect`. Edge geometry is recomputed on topology change (memoed deps) and on
+  container resize (ResizeObserver, falling back to a debounced `resize` listener for
+  older browsers). NOT recomputed on every render - the brief specifically called this
+  out.
+- Tour anchor kept as `data-tour="topology-canvas"` on the same `<main>` element in
+  Layout.tsx so the existing GuidedTour selector keeps working. Renaming would have
+  required either touching GuidedTour.tsx (out of scope) or duplicating the attribute.
+- `npm run lint` still broken (same Phase 0 root cause). `npx tsc --noEmit` and
+  `npm run build` both pass clean on this branch.
 
 ## Open questions
 
