@@ -3,6 +3,7 @@ import Layout from './components/Layout/Layout'
 import ToastContainer from './components/Alerts/ToastContainer'
 import CriticalOverlay from './components/Alerts/CriticalOverlay'
 import { GuidedTourAutoStart } from './components/GuidedTour'
+import { ErrorBoundary } from './components/common/ErrorBoundary'
 import ClusterDetailPage from './pages/ClusterDetailPage'
 import DocsPage from './pages/DocsPage'
 import HistoryPage from './pages/HistoryPage'
@@ -172,13 +173,21 @@ function App() {
 
   // Docs are public - render before auth gate
   if (route === '/docs' || route === 'docs') {
-    return <DocsPage />
+    return (
+      <ErrorBoundary label="Docs">
+        <DocsPage />
+      </ErrorBoundary>
+    )
   }
 
   const loginRoute = route === '/login' || route === 'login'
 
   if (!isAuthenticated) {
-    return <LoginPage showInitialSetupMessage={initialSetupComplete} />
+    return (
+      <ErrorBoundary label="Login">
+        <LoginPage showInitialSetupMessage={initialSetupComplete} />
+      </ErrorBoundary>
+    )
   }
 
   if (loginRoute) {
@@ -187,28 +196,40 @@ function App() {
   }
 
   if (route === '/history' || route === 'history') {
-    return <HistoryPage />
+    return (
+      <ErrorBoundary label="History">
+        <HistoryPage />
+      </ErrorBoundary>
+    )
   }
 
   if (route === '/settings' || route === 'settings') {
-    return <SettingsPage />
+    return (
+      <ErrorBoundary label="Settings">
+        <SettingsPage />
+      </ErrorBoundary>
+    )
   }
 
   // Cluster drill-in page. Matches `#/cluster/:id` (id is URL-encoded).
   if (route.startsWith('/cluster/')) {
     const clusterId = decodeURIComponent(route.substring('/cluster/'.length))
-    return <ClusterDetailRoute clusterId={clusterId} />
+    return (
+      <ErrorBoundary label="Cluster detail">
+        <ClusterDetailRoute clusterId={clusterId} />
+      </ErrorBoundary>
+    )
   }
 
   return (
-    <>
+    <ErrorBoundary label="Dashboard">
       {showSetupToast && (
         <div className="fixed top-4 right-4 z-50 rounded-lg border border-accent-cyan/40 bg-bg-secondary px-4 py-2 text-sm text-accent-cyan shadow-lg">
           Admin account configured.
         </div>
       )}
       <DashboardApp />
-    </>
+    </ErrorBoundary>
   )
 }
 
