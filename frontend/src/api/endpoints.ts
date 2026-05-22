@@ -111,21 +111,43 @@ function authHeaders(): HeadersInit {
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
+// Fetch has no built-in timeout - a stuck request would hang forever
+// and leak the in-flight promise. Mirror the axios client default.
+const FETCH_TIMEOUT_MS = 30_000
+
 async function fetchJson<T>(url: string, init?: RequestInit, fallback?: T): Promise<T> {
-  const res = await fetch(url, {
-    ...init,
-    headers: {
-      ...authHeaders(),
-      ...(init?.headers ?? {}),
-    },
-  })
-  if (!res.ok) {
-    if (fallback !== undefined) {
-      return fallback
+  const controller = new AbortController()
+  // If the caller passed their own signal, abort our controller when
+  // it fires too (covers component-unmount cancellation).
+  const callerSignal = init?.signal
+  if (callerSignal) {
+    if (callerSignal.aborted) {
+      controller.abort()
+    } else {
+      callerSignal.addEventListener('abort', () => controller.abort(), { once: true })
     }
-    throw new Error(`Request failed: ${res.status}`)
   }
-  return res.json() as Promise<T>
+  const timer = window.setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+
+  try {
+    const res = await fetch(url, {
+      ...init,
+      signal: controller.signal,
+      headers: {
+        ...authHeaders(),
+        ...(init?.headers ?? {}),
+      },
+    })
+    if (!res.ok) {
+      if (fallback !== undefined) {
+        return fallback
+      }
+      throw new Error(`Request failed: ${res.status}`)
+    }
+    return (await res.json()) as T
+  } finally {
+    window.clearTimeout(timer)
+  }
 }
 
 export async function fetchTopology(): Promise<Topology> {

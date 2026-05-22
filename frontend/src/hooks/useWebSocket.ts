@@ -9,12 +9,28 @@ function getWebSocketUrl(token: string): string {
   return url.toString()
 }
 
+// Reconnect backoff: 1s, 2s, 4s, 8s, 16s, 30s (capped).
+// Without a cap + backoff, an auth-failure or backend-down state used
+// to fire one reconnect every 3 seconds forever.
+const RECONNECT_BASE_MS = 1_000
+const RECONNECT_CAP_MS = 30_000
+
+// Server closes the socket with this code when the JWT is rejected
+// (see backend/app/websocket.py auth flow). Stop reconnecting on this -
+// the user needs to log in again, retrying with the same expired token
+// just produces a tight loop.
+const WS_CLOSE_AUTH_FAILURE = 4001
+
 export function useWebSocket() {
   const setConnected = useNocStore((state) => state.setConnected)
+  const handleAuthError = useAuthStore((state) => state.handleAuthError)
   const socketRef = useRef<WebSocket | null>(null)
   const reconnectTimerRef = useRef<number | null>(null)
+  const reconnectAttemptsRef = useRef(0)
+  const stoppedRef = useRef(false)
 
   const disconnect = useCallback(() => {
+    stoppedRef.current = true
     if (reconnectTimerRef.current !== null) {
       window.clearTimeout(reconnectTimerRef.current)
       reconnectTimerRef.current = null
@@ -23,12 +39,22 @@ export function useWebSocket() {
     const socket = socketRef.current
     socketRef.current = null
     if (socket) {
+      // Detach handlers before closing so the stale `onclose` does not
+      // re-arm the reconnect timer after we've already torn down.
+      socket.onopen = null
+      socket.onmessage = null
+      socket.onerror = null
+      socket.onclose = null
       socket.close()
     }
     setConnected(false)
   }, [setConnected])
 
   const connect = useCallback(() => {
+    if (stoppedRef.current) {
+      return
+    }
+
     const token = useAuthStore.getState().token || localStorage.getItem('watchtower_token')
     if (!token) {
       setConnected(false)
@@ -43,6 +69,7 @@ export function useWebSocket() {
     socketRef.current = socket
 
     socket.onopen = () => {
+      reconnectAttemptsRef.current = 0
       setConnected(true)
     }
 
@@ -61,23 +88,39 @@ export function useWebSocket() {
       setConnected(false)
     }
 
-    socket.onclose = () => {
-      const shouldReconnect = socketRef.current === socket
+    socket.onclose = (event) => {
+      const wasCurrent = socketRef.current === socket
       socketRef.current = null
       setConnected(false)
 
-      if (!shouldReconnect) {
+      if (!wasCurrent || stoppedRef.current) {
         return
       }
+
+      // Server-driven auth failure: trash the token and let the auth
+      // store route the user back to login instead of hammering /ws.
+      if (event.code === WS_CLOSE_AUTH_FAILURE) {
+        stoppedRef.current = true
+        handleAuthError()
+        return
+      }
+
+      // Exponential backoff capped at 30s, with a small jitter so a
+      // server restart does not produce a synchronized thundering herd.
+      const attempt = reconnectAttemptsRef.current
+      const delay = Math.min(RECONNECT_BASE_MS * 2 ** attempt, RECONNECT_CAP_MS)
+      const jittered = delay + Math.floor(Math.random() * 500)
+      reconnectAttemptsRef.current = attempt + 1
 
       reconnectTimerRef.current = window.setTimeout(() => {
         reconnectTimerRef.current = null
         connect()
-      }, 3000)
+      }, jittered)
     }
-  }, [setConnected])
+  }, [setConnected, handleAuthError])
 
   useEffect(() => {
+    stoppedRef.current = false
     connect()
     return () => disconnect()
   }, [connect, disconnect])
