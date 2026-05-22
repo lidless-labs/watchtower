@@ -529,10 +529,9 @@ export default function TopologyTiers() {
   )
 
   const handleDrillIn = useCallback((entry: ClusterEntry) => {
-    // Phase 2 will hook this into hash routing
-    // (`#/cluster/:id`). For now we just open the in-store detail
-    // panel slot so the action wires through; the visible UI for
-    // drill-in lands in the next phase.
+    // Phase 2: `openClusterDetail` now navigates to `#/cluster/:id`
+    // (encodes the cluster id) in addition to setting the legacy
+    // in-store slot. The detail page mounts and consumes the route.
     useNocStore.getState().openClusterDetail(entry.cluster.id)
   }, [])
 

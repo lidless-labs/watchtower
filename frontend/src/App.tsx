@@ -4,6 +4,7 @@ import Layout from './components/Layout/Layout'
 import ToastContainer from './components/Alerts/ToastContainer'
 import CriticalOverlay from './components/Alerts/CriticalOverlay'
 import { GuidedTourAutoStart } from './components/GuidedTour'
+import ClusterDetailPage from './pages/ClusterDetailPage'
 import DocsPage from './pages/DocsPage'
 import HistoryPage from './pages/HistoryPage'
 import LoginPage from './pages/LoginPage'
@@ -69,7 +70,12 @@ function useHashRoute(): string {
   return route
 }
 
-function DashboardApp() {
+/**
+ * Load topology + speedtest once and keep the websocket subscription
+ * alive. Shared by every authenticated dashboard-style route so that
+ * navigating between `#/` and `#/cluster/:id` does not refetch.
+ */
+function useDashboardData() {
   const setTopology = useNocStore((state) => state.setTopology)
   const setLoading = useNocStore((state) => state.setLoading)
   const setError = useNocStore((state) => state.setError)
@@ -98,6 +104,10 @@ function DashboardApp() {
 
     loadData()
   }, [setTopology, setLoading, setError, setSpeedtestStatus])
+}
+
+function DashboardApp() {
+  useDashboardData()
 
   return (
     <ReactFlowProvider>
@@ -106,6 +116,24 @@ function DashboardApp() {
       <CriticalOverlay />
       <GuidedTourAutoStart />
     </ReactFlowProvider>
+  )
+}
+
+/**
+ * Wrapper for the `#/cluster/:id` route. Reuses the dashboard's data
+ * loader so the topology is available, but deliberately skips
+ * `ReactFlowProvider` - the detail page is plain HTML, not a canvas.
+ * Toasts + critical overlay still mount so alerts surface here too.
+ */
+function ClusterDetailRoute({ clusterId }: { clusterId: string }) {
+  useDashboardData()
+
+  return (
+    <>
+      <ClusterDetailPage clusterId={clusterId} />
+      <ToastContainer />
+      <CriticalOverlay />
+    </>
   )
 }
 
@@ -166,6 +194,12 @@ function App() {
 
   if (route === '/settings' || route === 'settings') {
     return <SettingsPage />
+  }
+
+  // Cluster drill-in page. Matches `#/cluster/:id` (id is URL-encoded).
+  if (route.startsWith('/cluster/')) {
+    const clusterId = decodeURIComponent(route.substring('/cluster/'.length))
+    return <ClusterDetailRoute clusterId={clusterId} />
   }
 
   return (
