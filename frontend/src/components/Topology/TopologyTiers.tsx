@@ -203,15 +203,22 @@ function groupByTier(topology: Topology): TieredGroups {
 }
 
 /**
- * One inter-tier edge to render. We collapse multiple connections
- * between the same cluster pair to a single line per status so the
- * SVG doesn't explode on dense topologies; the worst status wins.
+ * One edge to render. We collapse multiple connections between the
+ * same cluster pair to a single line per status so the SVG doesn't
+ * explode on dense topologies; the worst status wins.
+ *
+ * `sameTier` edges (e.g. firewall HA pair, switch stack links, NAS
+ * replication) used to be dropped silently because the legacy layout
+ * couldn't render them without overlapping the cross-tier straight
+ * lines. We now keep them and render as a curved Bezier so they
+ * stay visible alongside cross-tier edges.
  */
 interface RenderEdge {
   sourceClusterId: string
   targetClusterId: string
   status: ConnectionStatus
   external?: boolean
+  sameTier?: boolean
 }
 
 const STATUS_PRIORITY: Record<ConnectionStatus, number> = {
@@ -230,9 +237,16 @@ function deviceClusterId(
 }
 
 /**
- * Build the list of cross-tier edges plus any external links. Edges
- * within the same tier are intentionally dropped - the lane adjacency
- * already implies them.
+ * Build the list of edges plus any external links. Cross-tier edges
+ * are rendered as straight lines; same-tier edges (sEntry.rank ===
+ * tEntry.rank, A != B) are flagged `sameTier` so the renderer draws a
+ * curved Bezier instead, keeping HA-pair / stack / replication links
+ * visible without overlapping the cross-tier lines.
+ *
+ * Self-loops (A == B - a cluster wired back to itself, like a stack
+ * member showing up twice in the same cluster) are still dropped:
+ * they'd render as a zero-length arc and the lane adjacency already
+ * implies the relationship.
  */
 function buildEdges(
   topology: Topology,
@@ -255,10 +269,11 @@ function buildEdges(
     const sourceCluster = deviceClusterId(conn.source, topology.devices)
     const targetCluster = deviceClusterId(conn.target, topology.devices)
     if (!sourceCluster || !targetCluster) continue
+    if (sourceCluster === targetCluster) continue // self-loop, skip
     const sEntry = byClusterId.get(sourceCluster)
     const tEntry = byClusterId.get(targetCluster)
     if (!sEntry || !tEntry) continue
-    if (sEntry.rank === tEntry.rank) continue // intra-tier - skip
+    const sameTier = sEntry.rank === tEntry.rank
     // Sort the pair so we collapse A->B and B->A together.
     const [a, b] =
       sourceCluster < targetCluster
@@ -269,6 +284,7 @@ function buildEdges(
       sourceClusterId: a,
       targetClusterId: b,
       status: conn.status,
+      sameTier,
     })
   }
 
@@ -557,19 +573,57 @@ export default function TopologyTiers() {
         style={{ zIndex: 0 }}
         aria-hidden
       >
-        {edgeGeometry.map((edge, i) => (
-          <line
-            key={`${edge.sourceClusterId}->${edge.targetClusterId}-${i}`}
-            x1={edge.x1}
-            y1={edge.y1}
-            x2={edge.x2}
-            y2={edge.y2}
-            stroke={EDGE_COLOR[edge.status]}
-            strokeWidth={edge.status === 'down' ? 2 : 1.5}
-            strokeOpacity={0.65}
-            strokeDasharray={edge.external ? '6 4' : undefined}
-          />
-        ))}
+        {edgeGeometry.map((edge, i) => {
+          const key = `${edge.sourceClusterId}->${edge.targetClusterId}-${i}`
+          const stroke = EDGE_COLOR[edge.status]
+          const strokeWidth = edge.status === 'down' ? 2 : 1.5
+          const dash = edge.external ? '6 4' : undefined
+          // Same-tier edges (firewall HA pair, switch stack, NAS
+          // replication, etc.) get a curved Bezier so they're visible
+          // even when both endpoints sit on the same y. Control point
+          // is offset perpendicular to the AB vector by ~35px, falling
+          // back to a vertical lift when the endpoints have identical
+          // coordinates (degenerate AB direction). All other styling
+          // (color, width, dash) is identical to the cross-tier line.
+          if (edge.sameTier) {
+            const dx = edge.x2 - edge.x1
+            const dy = edge.y2 - edge.y1
+            const len = Math.hypot(dx, dy) || 1
+            const offset = 35
+            // Perpendicular to (dx, dy), normalized; lift upward
+            // (negative y in SVG) so the arc dips above the lane row.
+            const px = -dy / len
+            const py = dx / len
+            const sign = py <= 0 ? 1 : -1
+            const cx = (edge.x1 + edge.x2) / 2 + px * offset * sign
+            const cy = (edge.y1 + edge.y2) / 2 + py * offset * sign
+            const d = `M ${edge.x1} ${edge.y1} Q ${cx} ${cy} ${edge.x2} ${edge.y2}`
+            return (
+              <path
+                key={key}
+                d={d}
+                fill="none"
+                stroke={stroke}
+                strokeWidth={strokeWidth}
+                strokeOpacity={0.65}
+                strokeDasharray={dash}
+              />
+            )
+          }
+          return (
+            <line
+              key={key}
+              x1={edge.x1}
+              y1={edge.y1}
+              x2={edge.x2}
+              y2={edge.y2}
+              stroke={stroke}
+              strokeWidth={strokeWidth}
+              strokeOpacity={0.65}
+              strokeDasharray={dash}
+            />
+          )
+        })}
       </svg>
 
       <div className="relative px-6 py-6 space-y-6" style={{ zIndex: 1 }}>
