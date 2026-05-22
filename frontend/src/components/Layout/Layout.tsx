@@ -1,41 +1,13 @@
-import { useEffect, useState } from 'react'
 import Header from './Header'
 import Sidebar from './Sidebar'
-import TopologyCanvas from '../Canvas/TopologyCanvas'
 import TopologyTiers from '../Topology/TopologyTiers'
 import { useNocStore } from '../../store/nocStore'
-
-/**
- * Read the `legacy=1` query flag from the current hash route.
- * Hash is shaped like `#/route?key=value`; split on `?` then parse with URLSearchParams.
- * Reactive via the `hashchange` event so toggling the URL bar updates the view live.
- */
-function useLegacyTopologyFlag(): boolean {
-  const read = () => {
-    const hash = window.location.hash.replace(/^#/, '')
-    const queryIndex = hash.indexOf('?')
-    if (queryIndex === -1) return false
-    const params = new URLSearchParams(hash.slice(queryIndex + 1))
-    return params.get('legacy') === '1'
-  }
-
-  const [legacy, setLegacy] = useState<boolean>(read)
-
-  useEffect(() => {
-    const handler = () => setLegacy(read())
-    window.addEventListener('hashchange', handler)
-    return () => window.removeEventListener('hashchange', handler)
-  }, [])
-
-  return legacy
-}
 
 export default function Layout() {
   const isLoading = useNocStore((state) => state.isLoading)
   const error = useNocStore((state) => state.error)
   const sidebarOpen = useNocStore((state) => state.sidebarOpen)
   const setSidebarOpen = useNocStore((state) => state.setSidebarOpen)
-  const legacyTopology = useLegacyTopologyFlag()
 
   if (error) {
     return (
@@ -58,7 +30,10 @@ export default function Layout() {
     <div className="min-h-screen flex flex-col bg-bg-primary">
       <Header />
       <div className="flex-1 flex overflow-hidden">
-        {/* Main canvas area */}
+        {/* Main topology area (tier swimlane view). Kept the
+            `data-tour="topology-canvas"` attribute so the GuidedTour
+            selector keeps matching - renaming would touch the tour
+            config + any external docs that reference the selector. */}
         <main className="flex-1 relative" data-tour="topology-canvas">
           {isLoading ? (
             <div className="absolute inset-0 flex items-center justify-center">
@@ -67,9 +42,6 @@ export default function Layout() {
                 <span className="text-text-secondary">Loading topology...</span>
               </div>
             </div>
-          ) : legacyTopology ? (
-            // Legacy React Flow canvas, reachable via `#/?legacy=1`. Will be deleted in Phase 4.
-            <TopologyCanvas />
           ) : (
             <TopologyTiers />
           )}

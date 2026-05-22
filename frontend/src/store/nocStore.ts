@@ -13,7 +13,11 @@ interface NocState {
   selectedConnection: Connection | null
   speedtestStatus: SpeedtestStatus
 
-  // L3 topology state
+  // L3 topology state. The legacy React Flow canvas was the only consumer
+  // of these slots; Phase 4 left them in place because the L3 feature is a
+  // separate first-class concern (its own API endpoint at
+  // `/api/topology/l3`, its own type module at `types/vlan.ts`) and may be
+  // wired into a new L3 view later. No current UI reads from them.
   viewMode: ViewMode
   l3Topology: L3Topology | null
   selectedVlans: Set<number>
@@ -23,9 +27,6 @@ interface NocState {
   error: string | null
   isConnected: boolean
   sidebarOpen: boolean
-  expandedClusters: Set<string>
-  detailPanelClusterId: string | null  // ID of cluster shown in detail panel
-  hoveredEdgeId: string | null  // ID of currently hovered edge
 
   // Actions
   setTopology: (topology: Topology) => void
@@ -37,18 +38,16 @@ interface NocState {
   setError: (error: string | null) => void
   setConnected: (connected: boolean) => void
   setSidebarOpen: (open: boolean) => void
-  toggleClusterExpanded: (clusterId: string) => void
   clearSelection: () => void
   setSpeedtestStatus: (status: SpeedtestStatus) => void
 
-  // Detail panel actions
+  // Detail panel actions. After Phase 4 these are pure hash-routing
+  // helpers - the legacy in-store `detailPanelClusterId` slot was
+  // deleted alongside the canvas sidebar that read it.
   openClusterDetail: (clusterId: string) => void
   closeClusterDetail: () => void
 
-  // Edge hover actions
-  setHoveredEdge: (edgeId: string | null) => void
-
-  // L3 actions
+  // L3 actions (see L3 state block above for the keep-or-remove rationale)
   setViewMode: (mode: ViewMode) => void
   setL3Topology: (topology: L3Topology | null) => void
   toggleVlanFilter: (vlanId: number) => void
@@ -71,9 +70,6 @@ export const useNocStore = create<NocState>((set, get) => ({
   error: null,
   isConnected: false,
   sidebarOpen: true,
-  expandedClusters: new Set<string>(),
-  detailPanelClusterId: null,
-  hoveredEdgeId: null,
 
   // Actions
   setTopology: (topology) => set({ topology, error: null }),
@@ -159,45 +155,23 @@ export const useNocStore = create<NocState>((set, get) => ({
   setConnected: (isConnected) => set({ isConnected }),
   setSidebarOpen: (sidebarOpen) => set({ sidebarOpen }),
 
-  toggleClusterExpanded: (clusterId) => {
-    const { expandedClusters } = get()
-    const newExpanded = new Set(expandedClusters)
-    if (newExpanded.has(clusterId)) {
-      newExpanded.delete(clusterId)
-    } else {
-      newExpanded.add(clusterId)
-    }
-    set({ expandedClusters: newExpanded })
-  },
-
   clearSelection: () => set({ selectedDevice: null, selectedConnection: null }),
 
   setSpeedtestStatus: (speedtestStatus) => set({ speedtestStatus }),
 
-  // Detail panel actions
-  //
-  // openClusterDetail now drives hash navigation to the dedicated
-  // #/cluster/:id page. The legacy in-store `detailPanelClusterId`
-  // slot is kept in sync so the legacy canvas sidebar still has
-  // something to read while Phase 0's `?legacy=1` escape hatch is live;
-  // Phase 4 will delete that slot along with the canvas. Calling
-  // closeClusterDetail from anywhere - tier card, legacy sidebar X
-  // button, escape handler - routes back to `#/`.
+  // Detail panel actions. After Phase 4 these are pure hash-routing
+  // helpers; the in-store `detailPanelClusterId` slot was deleted with
+  // the legacy canvas sidebar.
   openClusterDetail: (clusterId) => {
     if (typeof window !== 'undefined') {
       window.location.hash = `#/cluster/${encodeURIComponent(clusterId)}`
     }
-    set({ detailPanelClusterId: clusterId })
   },
   closeClusterDetail: () => {
     if (typeof window !== 'undefined' && window.location.hash.startsWith('#/cluster/')) {
       window.location.hash = '#/'
     }
-    set({ detailPanelClusterId: null })
   },
-
-  // Edge hover actions
-  setHoveredEdge: (edgeId) => set({ hoveredEdgeId: edgeId }),
 
   // L3 actions
   setViewMode: (viewMode) => set({ viewMode }),
