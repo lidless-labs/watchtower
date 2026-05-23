@@ -35,7 +35,6 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   componentDidCatch(error: Error, info: ErrorInfo): void {
     // Surface the failure in the browser console so devs can find the
     // component stack. In production this is the only diagnostic.
-    // eslint-disable-next-line no-console
     console.error('ErrorBoundary caught:', error, info.componentStack)
   }
 

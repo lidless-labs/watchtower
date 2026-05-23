@@ -11,6 +11,8 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
+TEST_JWT_SECRET = "watchtower-test-jwt-secret-32-bytes-ok"
+
 
 @pytest.fixture
 def fakeredis_client():
@@ -97,6 +99,7 @@ def _restore_config_singleton():
         yield
         return
     snapshot = config_module.config.model_dump()
+    config_module.config.auth.jwt_secret = TEST_JWT_SECRET
     yield
     restored = type(config_module.config)(**snapshot)
     for field_name in type(config_module.config).model_fields:

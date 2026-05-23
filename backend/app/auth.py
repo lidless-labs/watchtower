@@ -10,6 +10,8 @@ from fastapi import HTTPException, Request
 
 from .config import config
 
+JWT_SECRET_MIN_BYTES = 32
+
 
 class UserRole(str, Enum):
     ADMIN = "admin"
@@ -32,6 +34,18 @@ def verify_password(password: str, password_hash: str) -> bool:
         return False
 
 
+def is_jwt_secret_weak(secret: str) -> bool:
+    """Return True when an HS256 secret is below the RFC 7518 minimum."""
+    return len(secret.encode("utf-8")) < JWT_SECRET_MIN_BYTES
+
+
+def _jwt_secret() -> str:
+    secret = config.auth.jwt_secret
+    if is_jwt_secret_weak(secret):
+        raise HTTPException(status_code=500, detail="JWT secret is not configured securely")
+    return secret
+
+
 def create_token(user: dict) -> str:
     """Create a signed JWT for a user."""
     expires_at = datetime.now(timezone.utc) + timedelta(hours=config.auth.session_hours)
@@ -40,13 +54,13 @@ def create_token(user: dict) -> str:
         "role": user["role"],
         "exp": expires_at,
     }
-    return jwt.encode(payload, config.auth.jwt_secret, algorithm="HS256")
+    return jwt.encode(payload, _jwt_secret(), algorithm="HS256")
 
 
 def decode_token(token: str) -> dict:
     """Decode and validate a JWT token."""
     try:
-        payload = jwt.decode(token, config.auth.jwt_secret, algorithms=["HS256"])
+        payload = jwt.decode(token, _jwt_secret(), algorithms=["HS256"])
         username = payload.get("sub")
         role = payload.get("role")
         if not username or not role:

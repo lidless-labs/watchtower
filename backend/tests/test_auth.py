@@ -42,7 +42,7 @@ def app(wired_redis_cache, monkeypatch, tmp_path):
     # Reset auth state to a known baseline.
     config_module.config.auth.admin_user = "admin"
     config_module.config.auth.admin_password_hash = auth_module.hash_password("correct-horse-battery")
-    config_module.config.auth.jwt_secret = "test-secret-not-the-default"
+    config_module.config.auth.jwt_secret = "test-secret-not-the-default-minimum-32-bytes"
     config_module.config.auth.session_hours = 1
 
     application = FastAPI()
@@ -60,7 +60,7 @@ def test_create_and_decode_token_roundtrip(wired_redis_cache):
     from app import auth as auth_module
     from app import config as config_module
 
-    config_module.config.auth.jwt_secret = "rt-secret"
+    config_module.config.auth.jwt_secret = "roundtrip-secret-minimum-32-bytes-ok"
     token = auth_module.create_token({"username": "admin", "role": "admin"})
     decoded = auth_module.decode_token(token)
     assert decoded == {"username": "admin", "role": "admin"}
@@ -73,10 +73,10 @@ def test_decode_token_rejects_wrong_signature():
     from app import auth as auth_module
     from app import config as config_module
 
-    config_module.config.auth.jwt_secret = "the-real-secret"
+    config_module.config.auth.jwt_secret = "the-real-secret-minimum-32-bytes-ok"
     forged = jwt.encode(
         {"sub": "admin", "role": "admin", "exp": 9999999999},
-        "guessed-secret",
+        "guessed-secret-minimum-32-bytes-ok",
         algorithm="HS256",
     )
     with pytest.raises(HTTPException) as exc:
@@ -90,11 +90,28 @@ def test_decode_token_rejects_payload_without_role():
     from app import auth as auth_module
     from app import config as config_module
 
-    config_module.config.auth.jwt_secret = "secret-x"
-    bad = jwt.encode({"sub": "admin", "exp": 9999999999}, "secret-x", algorithm="HS256")
+    config_module.config.auth.jwt_secret = "payload-test-secret-minimum-32-bytes"
+    bad = jwt.encode(
+        {"sub": "admin", "exp": 9999999999},
+        "payload-test-secret-minimum-32-bytes",
+        algorithm="HS256",
+    )
     with pytest.raises(HTTPException) as exc:
         auth_module.decode_token(bad)
     assert exc.value.status_code == 401
+
+
+def test_create_token_rejects_weak_jwt_secret():
+    from app import auth as auth_module
+    from app import config as config_module
+
+    config_module.config.auth.jwt_secret = "short-secret"
+
+    with pytest.raises(HTTPException) as exc:
+        auth_module.create_token({"username": "admin", "role": "admin"})
+
+    assert exc.value.status_code == 500
+    assert exc.value.detail == "JWT secret is not configured securely"
 
 
 async def test_login_happy_path_returns_token(client):
@@ -177,7 +194,7 @@ async def test_change_password_requires_old_password(client, app):
 
     # Issue a valid admin token without going through /login (avoid extra
     # rate-limit pressure in tests that share the same fakeredis bucket).
-    config_module.config.auth.jwt_secret = "cp-secret"
+    config_module.config.auth.jwt_secret = "change-password-secret-minimum-32-bytes"
     token = auth_module.create_token({"username": "admin", "role": "admin"})
     headers = {"Authorization": f"Bearer {token}"}
 
@@ -202,7 +219,7 @@ async def test_change_password_rejects_short_new_password(client):
     from app import auth as auth_module
     from app import config as config_module
 
-    config_module.config.auth.jwt_secret = "cp-secret-2"
+    config_module.config.auth.jwt_secret = "change-password-short-secret-minimum-32-bytes"
     token = auth_module.create_token({"username": "admin", "role": "admin"})
     headers = {"Authorization": f"Bearer {token}"}
 

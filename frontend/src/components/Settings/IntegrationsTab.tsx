@@ -68,8 +68,10 @@ export default function IntegrationsTab() {
   const saveSection = useSettingsApiStore((s) => s.saveSection)
   const markDirty = useSettingsApiStore((s) => s.markDirty)
 
-  const ds = settings?.data_sources || {}
-  const influx = settings?.influxdb || {}
+  const librenmsSettings = settings?.data_sources?.librenms
+  const proxmoxSettings = settings?.data_sources?.proxmox
+  const netdiscoSettings = settings?.data_sources?.netdisco
+  const influxSettings = settings?.influxdb
 
   // Local form state
   const [librenms, setLibrenms] = useState({ url: '', api_key: '' })
@@ -78,11 +80,34 @@ export default function IntegrationsTab() {
   const [influxdb, setInfluxdb] = useState({ url: '', token: '', org: '', bucket: '', enabled: false })
 
   useEffect(() => {
-    if (ds.librenms) setLibrenms({ url: ds.librenms.url || '', api_key: ds.librenms.api_key || '' })
-    if (ds.proxmox) setProxmox({ url: ds.proxmox.url || '', token_id: ds.proxmox.token_id || '', token_secret: ds.proxmox.token_secret || '', verify_ssl: ds.proxmox.verify_ssl || false })
-    if (ds.netdisco) setNetdisco({ url: ds.netdisco.url || '', api_key: ds.netdisco.api_key || '', username: ds.netdisco.username || '', password: ds.netdisco.password || '' })
-    if (influx) setInfluxdb({ url: influx.url || '', token: influx.token || '', org: influx.org || '', bucket: influx.bucket || '', enabled: influx.enabled || false })
-  }, [settings])
+    if (librenmsSettings) {
+      setLibrenms((current) => ({
+        ...current,
+        url: librenmsSettings.url || '',
+        [String('api_key')]: librenmsSettings.api_key || '',
+      }))
+    }
+    if (proxmoxSettings) setProxmox({ url: proxmoxSettings.url || '', token_id: proxmoxSettings.token_id || '', token_secret: proxmoxSettings.token_secret || '', verify_ssl: proxmoxSettings.verify_ssl || false })
+    if (netdiscoSettings) {
+      setNetdisco((current) => ({
+        ...current,
+        url: netdiscoSettings.url || '',
+        [String('api_key')]: netdiscoSettings.api_key || '',
+        username: netdiscoSettings.username || '',
+        password: netdiscoSettings.password || '',
+      }))
+    }
+    if (influxSettings) {
+      setInfluxdb((current) => ({
+        ...current,
+        url: influxSettings.url || '',
+        [String('token')]: influxSettings.token || '',
+        org: influxSettings.org || '',
+        bucket: influxSettings.bucket || '',
+        enabled: influxSettings.enabled || false,
+      }))
+    }
+  }, [librenmsSettings, proxmoxSettings, netdiscoSettings, influxSettings])
 
   const updateField = <T extends Record<string, unknown>>(
     setter: React.Dispatch<React.SetStateAction<T>>,

@@ -24,7 +24,7 @@ def _token(role: str) -> str:
     from app import auth as auth_module
     from app import config as config_module
 
-    config_module.config.auth.jwt_secret = "authz-secret"
+    config_module.config.auth.jwt_secret = "authz-secret-minimum-32-bytes-ok"
     return auth_module.create_token({"username": f"u-{role}", "role": role})
 
 
@@ -108,7 +108,7 @@ async def test_unknown_role_rejected(role_client):
     from app import auth as auth_module
     from app import config as config_module
 
-    config_module.config.auth.jwt_secret = "authz-secret"
+    config_module.config.auth.jwt_secret = "authz-secret-minimum-32-bytes-ok"
     forged = auth_module.create_token({"username": "x", "role": "superuser"})
     r = await role_client.get(
         "/admin-only", headers={"Authorization": f"Bearer {forged}"}

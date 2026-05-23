@@ -105,7 +105,7 @@ export function parseInterfaceName(name: string): ParsedInterface | null {
 
   let stack = 0
   let module = 0
-  let port = 0
+  let port: number
 
   if (numMatch[3] !== undefined) {
     // Format: stack/module/port (e.g., "1/0/24")

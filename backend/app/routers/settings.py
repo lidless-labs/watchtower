@@ -242,7 +242,11 @@ async def get_settings_status(_current_user: dict = Depends(get_current_user)):
         }))
 
     for name, payload in checks:
-        result = await _run_connection_test(payload)
+        try:
+            result = await _run_connection_test(payload)
+        except HTTPException as exc:
+            status[name]["error"] = exc.detail
+            continue
         status[name]["connected"] = result.get("status") == "ok"
         if result.get("status") != "ok":
             status[name]["error"] = result.get("message")

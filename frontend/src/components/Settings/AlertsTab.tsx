@@ -64,6 +64,7 @@ export default function AlertsTab() {
   const settings = useSettingsApiStore((s) => s.settings)
   const saveSection = useSettingsApiStore((s) => s.saveSection)
   const markDirty = useSettingsApiStore((s) => s.markDirty)
+  const defaultThresholds = settings?.alert_thresholds?.defaults
 
   const [thresholds, setThresholds] = useState({
     cpu_warning: 80, cpu_critical: 95,
@@ -72,10 +73,10 @@ export default function AlertsTab() {
   })
 
   useEffect(() => {
-    if (settings?.alert_thresholds?.defaults) {
-      setThresholds({ ...thresholds, ...settings.alert_thresholds.defaults })
+    if (defaultThresholds) {
+      setThresholds((current) => ({ ...current, ...defaultThresholds }))
     }
-  }, [settings])
+  }, [defaultThresholds])
 
   const update = (field: string, value: number) => {
     setThresholds((prev) => ({ ...prev, [field]: value }))
