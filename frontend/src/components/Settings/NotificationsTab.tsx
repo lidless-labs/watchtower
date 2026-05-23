@@ -89,7 +89,7 @@ export default function NotificationsTab() {
       })
       const data = await res.json()
       setTestResult({ channel, ok: data.status === 'success' || data.status === 'demo', msg: data.status === 'success' ? 'Test sent!' : data.error || data.status })
-    } catch (err) {
+    } catch {
       setTestResult({ channel, ok: false, msg: 'Network error' })
     } finally { setTesting(null) }
   }

@@ -2,10 +2,9 @@ import { useCallback, useEffect, useRef } from 'react'
 import { useNocStore } from '../store/nocStore'
 import { useAuthStore } from '../store/authStore'
 
-function getWebSocketUrl(token: string): string {
+function getWebSocketUrl(): string {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   const url = new URL(`${protocol}//${window.location.host}/ws/updates`)
-  url.searchParams.set('token', token)
   return url.toString()
 }
 
@@ -65,17 +64,25 @@ export function useWebSocket() {
       return
     }
 
-    const socket = new WebSocket(getWebSocketUrl(token))
+    const socket = new WebSocket(getWebSocketUrl())
     socketRef.current = socket
 
     socket.onopen = () => {
-      reconnectAttemptsRef.current = 0
-      setConnected(true)
+      try {
+        socket.send(JSON.stringify({ type: 'authenticate', token }))
+      } catch {
+        socket.close()
+      }
     }
 
     socket.onmessage = (event) => {
       try {
         const message = JSON.parse(event.data) as { type?: string }
+        if (message.type === 'connected') {
+          reconnectAttemptsRef.current = 0
+          setConnected(true)
+          return
+        }
         if (message.type === 'pong') {
           return
         }

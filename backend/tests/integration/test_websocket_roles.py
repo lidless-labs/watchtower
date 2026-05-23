@@ -98,6 +98,17 @@ async def _drain_greeting(ws):
     return msg
 
 
+async def test_first_message_auth_connects_without_query_token(ws_url):
+    """Browser clients can authenticate without putting JWTs in the URL."""
+    token = _viewer_token()
+    async with websockets.connect(ws_url) as ws:
+        await ws.send(json.dumps({"type": "authenticate", "token": token}))
+        greeting = await _drain_greeting(ws)
+
+        assert greeting["user"]["role"] == UserRole.VIEWER.value
+        assert greeting["subscriptions"] == ["device_status_change"]
+
+
 async def test_viewer_receives_only_device_status_change(ws_url):
     """Viewer JWT subscribes; only `device_status_change` broadcasts arrive."""
     token = _viewer_token()

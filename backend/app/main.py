@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .auth import get_current_user, require_admin
+from .auth import get_current_user, is_jwt_secret_weak, require_admin
 from .cache import redis_cache
 from .config import config, settings, persist_config, reload_config
 from .polling import scheduler
@@ -37,20 +37,28 @@ async def lifespan(app: FastAPI):
     await redis_cache.connect()
     reload_config()
 
+    secret_rotation_reason = ""
     if config.auth.jwt_secret == "change-me-in-production":
+        secret_rotation_reason = "default placeholder"
+    elif is_jwt_secret_weak(config.auth.jwt_secret):
+        secret_rotation_reason = "shorter than 32 bytes"
+
+    if secret_rotation_reason:
         generated = secrets.token_urlsafe(32)
         try:
             persist_config({"auth": {"jwt_secret": generated}})
             logger.warning(
-                "JWT secret was the default placeholder; generated a "
-                "random one and persisted it to config.yaml."
+                "JWT secret was %s; generated a random one and persisted "
+                "it to config.yaml.",
+                secret_rotation_reason,
             )
         except Exception as exc:
             config.auth.jwt_secret = generated
             logger.critical(
-                "JWT secret was the default placeholder; persist failed "
+                "JWT secret was %s; persist failed "
                 "(%s). Using random secret for THIS session only. Sessions "
                 "will NOT survive a restart until config.yaml is writable.",
+                secret_rotation_reason,
                 exc,
             )
 

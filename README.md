@@ -114,7 +114,7 @@ Edit `config/config.yaml` with your credentials:
 auth:
   admin_user: admin
   admin_password_hash: ""  # Set on first login
-  jwt_secret: "change-this-to-random-string"
+  jwt_secret: "change-this-to-at-least-32-random-bytes"
 
 data_sources:
   librenms:
