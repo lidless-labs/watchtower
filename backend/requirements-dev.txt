@@ -1,0 +1,15 @@
+# Watchtower Backend Development/Test Dependencies
+#
+# Install with runtime dependencies:
+#   pip install -r requirements.txt -r requirements-dev.txt
+
+# Test runner
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
+
+# Test Redis doubles
+fakeredis[lua]>=2.20.0  # [lua] extra is required: ratelimit.py uses EVAL scripts
+
+# Lint and dependency audit
+ruff>=0.14.0
+pip-audit>=2.9.0

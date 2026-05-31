@@ -35,6 +35,8 @@ Use the printed first-login URL once, set a strong admin password, then treat th
 
 The installer binds Uvicorn to `127.0.0.1:8000` and exposes the app through nginx on port 80. The systemd service uses `NoNewPrivileges=true`, `ProtectSystem=strict`, and explicit write paths for config and runtime data.
 
+Production installs use `backend/requirements.txt` only. Developer and CI tooling lives in `backend/requirements-dev.txt` and is not installed by `install/install.sh`.
+
 Keep Redis local unless you intentionally move it. If Redis is remote, set `REDIS_URL` through a systemd drop-in and validate `/ready`.
 
 ## Validation Commands

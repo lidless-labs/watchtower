@@ -31,7 +31,7 @@ if [[ ! -d "venv" ]]; then
 fi
 
 source venv/bin/activate
-pip install -q -r requirements.txt
+pip install -q -r requirements.txt -r requirements-dev.txt
 
 # Frontend setup
 echo -e "${GREEN}Setting up frontend...${NC}"

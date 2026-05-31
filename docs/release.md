@@ -15,7 +15,8 @@ Use tags shaped like `v1.2.3`.
 Run:
 
 ```bash
-cd backend && ../.venv/bin/ruff check app tests && ../.venv/bin/pytest -q
+cd backend && python -m pip install -r requirements.txt -r requirements-dev.txt
+ruff check app tests && pytest -q
 cd ../frontend && npm ci && npm run lint && npm run test -- --run && npm run build
 ```
 
