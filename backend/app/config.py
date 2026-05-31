@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -75,7 +75,12 @@ class ProxmoxConfig(BaseModel):
     token_id: str = ""
     token_secret: str = ""
     verify_ssl: bool = False
-    additional: list[ProxmoxInstanceConfig] = []
+    additional: list[ProxmoxInstanceConfig] = Field(default_factory=list)
+
+    @field_validator("additional", mode="before")
+    @classmethod
+    def _none_additional_is_empty(cls, value: Any) -> Any:
+        return [] if value is None else value
 
 
 class PaloAltoFirewallConfig(BaseModel):

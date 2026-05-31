@@ -16,6 +16,9 @@ NC='\033[0m'
 APP_DIR="/opt/watchtower"
 APP_USER="watchtower"
 BOOTSTRAP_ENV="/etc/watchtower/bootstrap.env"
+REPO_URL="${WATCHTOWER_REPO_URL:-https://github.com/solomonneas/watchtower.git}"
+REPO_REF="${WATCHTOWER_REPO_REF:-main}"
+SOURCE_DIR="${WATCHTOWER_SOURCE_DIR:-}"
 
 echo -e "${CYAN}"
 echo "╔═══════════════════════════════════════════╗"
@@ -54,6 +57,7 @@ if [[ "$OS" == "debian" ]] || [[ "$OS" == "ubuntu" ]]; then
         nginx \
         curl \
         git \
+        sudo \
         ca-certificates \
         openssh-server
 
@@ -89,17 +93,39 @@ id -u $APP_USER &>/dev/null || useradd -r -s /bin/bash -d $APP_DIR -m $APP_USER
 
 # Clone or update repository
 echo -e "\n${GREEN}=== Downloading Watchtower ===${NC}"
-if [[ -d "$APP_DIR/.git" ]]; then
+if [[ -n "$SOURCE_DIR" ]]; then
+    if [[ ! -d "$SOURCE_DIR" ]]; then
+        echo -e "${RED}WATCHTOWER_SOURCE_DIR does not exist: $SOURCE_DIR${NC}"
+        exit 1
+    fi
+
+    echo "Installing from local source directory: $SOURCE_DIR"
+    rm -rf "$APP_DIR"
+    mkdir -p "$APP_DIR"
+    tar \
+        --exclude='.git' \
+        --exclude='node_modules' \
+        --exclude='frontend/dist' \
+        --exclude='backend/venv' \
+        --exclude='backend/.venv' \
+        --exclude='.venv' \
+        -C "$SOURCE_DIR" -cf - . | tar -C "$APP_DIR" -xf -
+elif [[ -d "$APP_DIR/.git" ]]; then
     echo "Updating existing installation..."
-    cd $APP_DIR
-    git fetch origin
-    git reset --hard origin/main
+    cd "$APP_DIR"
+    git remote set-url origin "$REPO_URL"
+    git fetch --depth=1 origin "$REPO_REF"
+    git reset --hard FETCH_HEAD
 else
-    rm -rf $APP_DIR
-    git clone https://github.com/solomonneas/watchtower.git $APP_DIR
+    rm -rf "$APP_DIR"
+    mkdir -p "$APP_DIR"
+    git -C "$APP_DIR" init
+    git -C "$APP_DIR" remote add origin "$REPO_URL"
+    git -C "$APP_DIR" fetch --depth=1 origin "$REPO_REF"
+    git -C "$APP_DIR" checkout --force FETCH_HEAD
 fi
 
-chown -R $APP_USER:$APP_USER $APP_DIR
+chown -R "$APP_USER:$APP_USER" "$APP_DIR"
 
 # Setup Python environment
 echo -e "\n${GREEN}=== Setting Up Python Environment ===${NC}"
@@ -153,6 +179,8 @@ User=$APP_USER
 Group=$APP_USER
 WorkingDirectory=$APP_DIR/backend
 Environment=PATH=$APP_DIR/backend/venv/bin:/usr/bin
+Environment=CONFIG_PATH=$APP_DIR/config/config.yaml
+Environment=TOPOLOGY_PATH=$APP_DIR/config/topology.yaml
 EnvironmentFile=-$BOOTSTRAP_ENV
 ExecStart=$APP_DIR/backend/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
 Restart=always
@@ -239,21 +267,27 @@ systemctl enable watchtower
 systemctl enable nginx
 
 systemctl start redis-server
-systemctl start watchtower
+systemctl restart watchtower
 systemctl restart nginx
-
-# Wait for backend to start
-sleep 3
 
 # Get IP address
 IP_ADDR=$(hostname -I | awk '{print $1}')
 
 # Test health
 echo -e "\n${GREEN}=== Testing Installation ===${NC}"
-if curl -s http://127.0.0.1:8000/health | grep -q "healthy"; then
+healthy=false
+for _ in $(seq 1 30); do
+    if curl -s http://127.0.0.1:8000/health | grep -q "healthy"; then
+        healthy=true
+        break
+    fi
+    sleep 1
+done
+
+if [[ "$healthy" == "true" ]]; then
     echo -e "${GREEN}Backend is running!${NC}"
 else
-    echo -e "${YELLOW}Backend may still be starting...${NC}"
+    echo -e "${YELLOW}Backend did not become healthy within 30 seconds. Check: journalctl -u watchtower -n 100 --no-pager${NC}"
 fi
 
 echo -e "\n${CYAN}╔═══════════════════════════════════════════╗${NC}"

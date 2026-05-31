@@ -1,6 +1,10 @@
 """Diagnostics API routes for testing data source connectivity."""
 
 import logging
+import platform
+import sys
+import time
+from pathlib import Path
 
 from fastapi import APIRouter
 
@@ -9,11 +13,13 @@ from app.polling.librenms import LibreNMSClient
 from app.polling.netdisco import NetdiscoClient
 from app.polling.proxmox import ProxmoxClient
 from app.polling.scheduler import scheduler, CACHE_DEVICES, CACHE_ALERTS, CACHE_LAST_POLL, CACHE_PROXMOX, CACHE_PROXMOX_VMS
-from app.config import get_config, get_settings
+from app.config import get_config, get_settings, settings
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/diagnostics", tags=["diagnostics"])
+
+PROCESS_STARTED_AT = time.time()
 
 
 @router.get("/config")
@@ -33,6 +39,55 @@ async def check_config():
             "url": config.data_sources.proxmox.url or "(not configured)",
             "has_token": bool(config.data_sources.proxmox.token_id),
         },
+    }
+
+
+@router.get("/system")
+async def get_system_diagnostics():
+    """Return a redacted operator view of runtime health and service state."""
+    redis_check: dict[str, object] = {"ok": False}
+    start = time.perf_counter()
+
+    try:
+        await redis_cache.client.ping()
+        redis_check = {
+            "ok": True,
+            "latency_ms": round((time.perf_counter() - start) * 1000, 2),
+        }
+    except Exception as exc:  # noqa: BLE001
+        redis_check = {"ok": False, "error": exc.__class__.__name__}
+
+    try:
+        scheduler_running = bool(scheduler._scheduler is not None and scheduler._scheduler.running)
+    except Exception:
+        scheduler_running = False
+
+    config_path = Path(settings.config_path)
+    if not config_path.is_absolute():
+        config_path = Path(__file__).parent.parent.parent / settings.config_path
+
+    config_file_check = {
+        "ok": config_path.exists(),
+        "path": str(config_path),
+        "mode": oct(config_path.stat().st_mode & 0o777) if config_path.exists() else None,
+    }
+    checks = {
+        "redis": redis_check,
+        "config_file": config_file_check,
+        "scheduler": {"running": scheduler_running},
+    }
+    healthy = bool(redis_check["ok"]) and bool(config_file_check["ok"])
+
+    return {
+        "status": "ok" if healthy else "degraded",
+        "service": "watchtower",
+        "runtime": {
+            "python": sys.version.split()[0],
+            "platform": platform.platform(),
+            "uptime_seconds": round(time.time() - PROCESS_STARTED_AT, 3),
+            "dev_mode": settings.dev_mode,
+        },
+        "checks": checks,
     }
 
 

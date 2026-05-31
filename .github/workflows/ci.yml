@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   backend:
-    name: Backend (lint, type-check, test)
+    name: Backend
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -41,26 +41,16 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install ruff mypy
+          pip install -r requirements.txt ruff
 
       - name: Lint (ruff)
-        run: ruff check app
-
-      - name: Type-check (mypy, advisory)
-        run: mypy app
-        continue-on-error: true  # advisory until codebase is baselined
+        run: ruff check app tests
 
       - name: Test (pytest)
-        run: |
-          if [ -d tests ] && find tests -name 'test_*.py' -print -quit | grep -q .; then
-            pytest -q
-          else
-            echo "No tests yet, skipping pytest."
-          fi
+        run: pytest -q
 
   frontend:
-    name: Frontend (type-check, test)
+    name: Frontend
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -81,16 +71,20 @@ jobs:
       - name: Audit dependencies
         run: npm audit --audit-level=moderate
 
-      - name: Type-check
-        run: npx tsc --noEmit
+      - name: Lint
+        run: npm run lint
 
       - name: Test (vitest)
-        run: |
-          if find src \( -name '*.test.ts' -o -name '*.test.tsx' \) -print -quit 2>/dev/null | grep -q .; then
-            npx vitest run
-          else
-            echo "No tests yet, skipping vitest."
-          fi
+        run: npm run test -- --run
+
+      - name: Build
+        run: npm run build
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Browser smoke tests
+        run: npm run test:e2e
 
   audit:
     name: pip-audit

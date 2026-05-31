@@ -19,6 +19,7 @@ from app import config as config_module
 from app.config import (
     AppConfig,
     NotificationsConfig,
+    ProxmoxConfig,
     _apply_config,
     is_placeholder_jwt_secret,
     is_strong_jwt_secret,
@@ -123,3 +124,19 @@ def test_cooldown_minutes_zero_is_valid():
 def test_cooldown_minutes_negative_rejected():
     with pytest.raises(Exception):
         NotificationsConfig(cooldown_minutes=-1)
+
+
+def test_blank_proxmox_additional_is_treated_as_empty_list():
+    cfg = ProxmoxConfig(additional=None)
+    assert cfg.additional == []
+
+
+def test_example_config_does_not_enable_placeholder_data_sources():
+    example_path = Path(__file__).resolve().parents[2] / "config" / "config.example.yaml"
+    example = yaml.safe_load(example_path.read_text(encoding="utf-8"))
+
+    data_sources = example["data_sources"]
+    assert data_sources["librenms"]["url"] == ""
+    assert data_sources["netdisco"]["url"] == ""
+    assert data_sources["proxmox"]["url"] == ""
+    assert data_sources["proxmox"]["additional"] == []

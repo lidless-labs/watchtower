@@ -1,5 +1,7 @@
 import { defineConfig, devices } from '@playwright/test'
 
+const browserChannel = process.env.PLAYWRIGHT_CHROMIUM_CHANNEL || (process.env.CI ? undefined : 'chrome')
+
 export default defineConfig({
   testDir: './tests/e2e',
   timeout: 20_000,
@@ -19,7 +21,7 @@ export default defineConfig({
       name: 'chromium',
       use: {
         ...devices['Desktop Chrome'],
-        channel: process.env.PLAYWRIGHT_CHROMIUM_CHANNEL || 'chrome',
+        channel: browserChannel,
         launchOptions: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE
           ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE }
           : undefined,

@@ -12,27 +12,29 @@ auth:
 # Data Sources
 data_sources:
   librenms:
-    url: "https://librenms.local"
-    api_key: "your-librenms-api-key"
-    webhook_token: "random-webhook-token"
+    url: ""
+    api_key: ""
+    webhook_token: ""
 
   netdisco:
-    url: "https://netdisco.local"
-    api_key: "your-netdisco-api-key"
+    url: ""
+    api_key: ""
     username: ""
     password: ""
 
   proxmox:
-    url: "https://proxmox.local:8006"
-    token_id: "watchtower@pam!monitoring"
-    token_secret: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+    url: ""
+    token_id: ""
+    token_secret: ""
     verify_ssl: false
-    additional:
-      # - name: "secondary"
-      #   url: "https://proxmox2.local:8006"
-      #   token_id: "watchtower@pam!monitoring"
-      #   token_secret: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-      #   verify_ssl: false
+    additional: []
+    # Example:
+    # additional:
+    #   - name: "secondary"
+    #     url: "https://proxmox2.local:8006"
+    #     token_id: "watchtower@pam!monitoring"
+    #     token_secret: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+    #     verify_ssl: false
 
 # Polling Intervals (seconds)
 polling:
