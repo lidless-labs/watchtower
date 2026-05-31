@@ -4,10 +4,18 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from .auth import get_current_user, require_admin
 from .cache import redis_cache
-from .config import config, settings, persist_config, reload_config
+from .config import (
+    config,
+    is_placeholder_jwt_secret,
+    persist_config,
+    reload_config,
+    settings,
+    validate_jwt_secret_for_runtime,
+)
 from .polling import scheduler
 from .routers import alerts_router, devices_router, topology_router, history_router, settings_router
 from .routers.alerts import shutdown_notification_worker
@@ -37,7 +45,7 @@ async def lifespan(app: FastAPI):
     await redis_cache.connect()
     reload_config()
 
-    if config.auth.jwt_secret == "change-me-in-production":
+    if is_placeholder_jwt_secret(config.auth.jwt_secret):
         generated = secrets.token_urlsafe(32)
         try:
             persist_config({"auth": {"jwt_secret": generated}})
@@ -53,6 +61,8 @@ async def lifespan(app: FastAPI):
                 "will NOT survive a restart until config.yaml is writable.",
                 exc,
             )
+
+    validate_jwt_secret_for_runtime(config.auth.jwt_secret, dev_mode=settings.dev_mode)
 
     if config.influxdb.enabled or settings.influxdb_enabled:
         if config.influxdb.url:
@@ -140,12 +150,44 @@ app.include_router(auth_router, prefix="/api", tags=["auth"])
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint."""
+    """Liveness check endpoint."""
     return {
         "status": "healthy",
         "service": "watchtower",
         "websocket_clients": ws_manager.connection_count,
     }
+
+
+@app.get("/ready")
+async def readiness_check():
+    """Readiness check for dependencies needed to serve authenticated API traffic."""
+    checks: dict[str, dict[str, object]] = {
+        "config": {"ok": True},
+        "jwt_secret": {"ok": True},
+        "redis": {"ok": False},
+    }
+
+    try:
+        validate_jwt_secret_for_runtime(config.auth.jwt_secret, dev_mode=settings.dev_mode)
+    except RuntimeError as exc:
+        checks["jwt_secret"] = {"ok": False, "error": str(exc)}
+
+    try:
+        await redis_cache.client.ping()
+        checks["redis"] = {"ok": True}
+    except Exception as exc:  # noqa: BLE001
+        checks["redis"] = {"ok": False, "error": exc.__class__.__name__}
+
+    ready = all(bool(check["ok"]) for check in checks.values())
+    status_code = 200 if ready else 503
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "status": "ready" if ready else "not_ready",
+            "service": "watchtower",
+            "checks": checks,
+        },
+    )
 
 
 @app.get("/api/config")

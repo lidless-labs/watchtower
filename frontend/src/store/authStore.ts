@@ -25,7 +25,7 @@ interface AuthState {
   user: AuthUser | null
   isAuthenticated: boolean
   initialSetupComplete: boolean
-  login: (username: string, password: string) => Promise<void>
+  login: (username: string, password: string, bootstrapToken?: string) => Promise<void>
   logout: () => void
   checkAuth: () => Promise<boolean>
   clearInitialSetupFlag: () => void
@@ -64,11 +64,17 @@ export const useAuthStore = create<AuthState>()(
       isAuthenticated: false,
       initialSetupComplete: false,
 
-      login: async (username, password) => {
-        const response = await apiClient.post<LoginResponse>('/auth/login', {
-          username,
-          password,
-        })
+      login: async (username, password, bootstrapToken) => {
+        const response = await apiClient.post<LoginResponse>(
+          '/auth/login',
+          {
+            username,
+            password,
+          },
+          {
+            headers: bootstrapToken ? { 'X-Watchtower-Bootstrap-Token': bootstrapToken } : undefined,
+          }
+        )
 
         const { token, user, initial_setup } = response.data
         localStorage.setItem('watchtower_token', token)

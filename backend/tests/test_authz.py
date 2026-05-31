@@ -15,6 +15,8 @@ import pytest
 from fastapi import Depends, FastAPI
 from httpx import ASGITransport, AsyncClient
 
+TEST_JWT_SECRET = "authz-test-jwt-secret-32-bytes-min"
+
 
 def _make_client(app: FastAPI) -> AsyncClient:
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
@@ -24,7 +26,8 @@ def _token(role: str) -> str:
     from app import auth as auth_module
     from app import config as config_module
 
-    config_module.config.auth.jwt_secret = "authz-secret"
+    config_module.config.auth.jwt_secret = TEST_JWT_SECRET
+    config_module.config.auth.token_version = 1
     return auth_module.create_token({"username": f"u-{role}", "role": role})
 
 
@@ -108,7 +111,8 @@ async def test_unknown_role_rejected(role_client):
     from app import auth as auth_module
     from app import config as config_module
 
-    config_module.config.auth.jwt_secret = "authz-secret"
+    config_module.config.auth.jwt_secret = TEST_JWT_SECRET
+    config_module.config.auth.token_version = 1
     forged = auth_module.create_token({"username": "x", "role": "superuser"})
     r = await role_client.get(
         "/admin-only", headers={"Authorization": f"Bearer {forged}"}

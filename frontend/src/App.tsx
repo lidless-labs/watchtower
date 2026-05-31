@@ -1,18 +1,19 @@
-import { useEffect, useState } from 'react'
-import Layout from './components/Layout/Layout'
+import { Suspense, lazy, useEffect, useState } from 'react'
 import ToastContainer from './components/Alerts/ToastContainer'
 import CriticalOverlay from './components/Alerts/CriticalOverlay'
 import { GuidedTourAutoStart } from './components/GuidedTour'
 import { ErrorBoundary } from './components/common/ErrorBoundary'
-import ClusterDetailPage from './pages/ClusterDetailPage'
-import DocsPage from './pages/DocsPage'
-import HistoryPage from './pages/HistoryPage'
 import LoginPage from './pages/LoginPage'
-import SettingsPage from './pages/SettingsPage'
 import { useNocStore } from './store/nocStore'
 import { useAuthStore } from './store/authStore'
 import { useWebSocket } from './hooks/useWebSocket'
 import { fetchTopology, fetchSpeedtest } from './api/endpoints'
+
+const Layout = lazy(() => import('./components/Layout/Layout'))
+const ClusterDetailPage = lazy(() => import('./pages/ClusterDetailPage'))
+const DocsPage = lazy(() => import('./pages/DocsPage'))
+const HistoryPage = lazy(() => import('./pages/HistoryPage'))
+const SettingsPage = lazy(() => import('./pages/SettingsPage'))
 
 // Debug helper - expose store methods to window for testing
 // Usage in browser console:
@@ -111,7 +112,9 @@ function DashboardApp() {
 
   return (
     <>
-      <Layout />
+      <Suspense fallback={<RouteLoading />}>
+        <Layout />
+      </Suspense>
       <ToastContainer />
       <CriticalOverlay />
       <GuidedTourAutoStart />
@@ -129,10 +132,20 @@ function ClusterDetailRoute({ clusterId }: { clusterId: string }) {
 
   return (
     <>
-      <ClusterDetailPage clusterId={clusterId} />
+      <Suspense fallback={<RouteLoading />}>
+        <ClusterDetailPage clusterId={clusterId} />
+      </Suspense>
       <ToastContainer />
       <CriticalOverlay />
     </>
+  )
+}
+
+function RouteLoading() {
+  return (
+    <div className="min-h-screen bg-bg-primary text-text-secondary flex items-center justify-center">
+      Loading...
+    </div>
   )
 }
 
@@ -164,11 +177,7 @@ function App() {
   }, [isAuthenticated, initialSetupComplete, clearInitialSetupFlag])
 
   if (!authChecked) {
-    return (
-      <div className="min-h-screen bg-bg-primary text-text-secondary flex items-center justify-center">
-        Loading...
-      </div>
-    )
+    return <RouteLoading />
   }
 
   // Docs are public - render before auth gate.
@@ -183,7 +192,9 @@ function App() {
   if (route === '/docs' || route === 'docs') {
     return (
       <ErrorBoundary key={route} label="Docs">
-        <DocsPage />
+        <Suspense fallback={<RouteLoading />}>
+          <DocsPage />
+        </Suspense>
       </ErrorBoundary>
     )
   }
@@ -206,7 +217,9 @@ function App() {
   if (route === '/history' || route === 'history') {
     return (
       <ErrorBoundary key={route} label="History">
-        <HistoryPage />
+        <Suspense fallback={<RouteLoading />}>
+          <HistoryPage />
+        </Suspense>
       </ErrorBoundary>
     )
   }
@@ -214,7 +227,9 @@ function App() {
   if (route === '/settings' || route === 'settings') {
     return (
       <ErrorBoundary key={route} label="Settings">
-        <SettingsPage />
+        <Suspense fallback={<RouteLoading />}>
+          <SettingsPage />
+        </Suspense>
       </ErrorBoundary>
     )
   }

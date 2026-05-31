@@ -21,6 +21,15 @@ const RECONNECT_CAP_MS = 30_000
 // just produces a tight loop.
 const WS_CLOSE_AUTH_FAILURE = 4001
 
+export function getReconnectDelayMs(attempt: number, random: () => number = Math.random): number {
+  const delay = Math.min(RECONNECT_BASE_MS * 2 ** attempt, RECONNECT_CAP_MS)
+  return delay + Math.floor(random() * 500)
+}
+
+export function isAuthFailureClose(code: number): boolean {
+  return code === WS_CLOSE_AUTH_FAILURE
+}
+
 export function useWebSocket() {
   const setConnected = useNocStore((state) => state.setConnected)
   const handleAuthError = useAuthStore((state) => state.handleAuthError)
@@ -99,7 +108,7 @@ export function useWebSocket() {
 
       // Server-driven auth failure: trash the token and let the auth
       // store route the user back to login instead of hammering /ws.
-      if (event.code === WS_CLOSE_AUTH_FAILURE) {
+      if (isAuthFailureClose(event.code)) {
         stoppedRef.current = true
         handleAuthError()
         return
@@ -108,8 +117,7 @@ export function useWebSocket() {
       // Exponential backoff capped at 30s, with a small jitter so a
       // server restart does not produce a synchronized thundering herd.
       const attempt = reconnectAttemptsRef.current
-      const delay = Math.min(RECONNECT_BASE_MS * 2 ** attempt, RECONNECT_CAP_MS)
-      const jittered = delay + Math.floor(Math.random() * 500)
+      const jittered = getReconnectDelayMs(attempt)
       reconnectAttemptsRef.current = attempt + 1
 
       reconnectTimerRef.current = window.setTimeout(() => {

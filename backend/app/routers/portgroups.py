@@ -7,7 +7,6 @@ Endpoints for monitoring aggregate traffic on port groups (e.g., department conn
 from __future__ import annotations
 
 from datetime import datetime
-from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
@@ -15,6 +14,7 @@ from pydantic import BaseModel
 
 from app.config import get_config
 from app.polling.librenms import LibreNMSClient
+from app.safe_exports import validate_csv_export_path
 
 router = APIRouter(prefix="/port-groups", tags=["port-groups"])
 
@@ -151,13 +151,7 @@ async def export_port_group_csv(group_name: str) -> FileResponse:
             detail="CSV logging is not enabled for this port group",
         )
 
-    csv_path = Path(matching_group.logging.path)
-
-    if not csv_path.exists():
-        raise HTTPException(
-            status_code=404,
-            detail="No traffic history available yet",
-        )
+    csv_path = validate_csv_export_path(matching_group.logging.path)
 
     today = datetime.utcnow().strftime("%Y-%m-%d")
     safe_name = group_name.lower().replace(" ", "_")

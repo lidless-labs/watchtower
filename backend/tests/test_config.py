@@ -16,7 +16,15 @@ import pytest
 import yaml
 
 from app import config as config_module
-from app.config import AppConfig, NotificationsConfig, _apply_config, persist_config
+from app.config import (
+    AppConfig,
+    NotificationsConfig,
+    _apply_config,
+    is_placeholder_jwt_secret,
+    is_strong_jwt_secret,
+    persist_config,
+    validate_jwt_secret_for_runtime,
+)
 
 
 def test_apply_config_mutates_singleton_in_place():
@@ -59,6 +67,26 @@ def test_persist_config_round_trips_through_yaml(tmp_path, monkeypatch):
     on_disk = yaml.safe_load(Path(cfg_path).read_text())
     assert on_disk["auth"]["jwt_secret"] == "from-disk"
     assert config_module.config.auth.jwt_secret == "from-disk"
+    assert (cfg_path.stat().st_mode & 0o777) == 0o600
+
+
+def test_known_jwt_placeholders_are_unsafe():
+    assert is_placeholder_jwt_secret("")
+    assert is_placeholder_jwt_secret("change-me-in-production")
+    assert is_placeholder_jwt_secret("change-this-to-a-random-secret-in-production")
+    assert is_placeholder_jwt_secret("change-this-to-random-string")
+    assert not is_placeholder_jwt_secret("actual-random-secret")
+
+
+def test_production_jwt_secret_must_be_strong():
+    assert not is_strong_jwt_secret("short-secret")
+    assert is_strong_jwt_secret("strong-test-secret-at-least-32-bytes")
+
+    with pytest.raises(RuntimeError):
+        validate_jwt_secret_for_runtime("short-secret", dev_mode=False)
+
+    validate_jwt_secret_for_runtime("short-secret", dev_mode=True)
+    validate_jwt_secret_for_runtime("change-me-in-production", dev_mode=False)
 
 
 def test_persist_config_invalid_payload_does_not_write(tmp_path, monkeypatch):

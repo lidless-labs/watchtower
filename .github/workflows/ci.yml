@@ -78,6 +78,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Audit dependencies
+        run: npm audit --audit-level=moderate
+
       - name: Type-check
         run: npx tsc --noEmit
 
@@ -90,9 +93,8 @@ jobs:
           fi
 
   audit:
-    name: pip-audit (advisory)
+    name: pip-audit
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

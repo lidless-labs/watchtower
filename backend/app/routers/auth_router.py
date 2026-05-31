@@ -3,14 +3,12 @@
 import logging
 import os
 from datetime import datetime, timezone
-from pathlib import Path
 
-import yaml
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from ..auth import UserRole, create_token, get_current_user, hash_password, verify_password
-from ..config import config, load_yaml_config, settings
+from ..config import config, persist_config, settings
 from ..ratelimit import sliding_window_check
 
 logger = logging.getLogger(__name__)
@@ -58,29 +56,17 @@ class ChangePasswordRequest(BaseModel):
     new_password: str = Field(min_length=8)
 
 
-def _config_file_path() -> Path:
-    config_path = Path(settings.config_path)
-    if not config_path.is_absolute():
-        config_path = Path(__file__).parent.parent.parent / settings.config_path
-    return config_path
-
-
 def _persist_admin_password_hash(password_hash: str) -> None:
-    config_path = _config_file_path()
-    data = load_yaml_config(str(config_path)) if config_path.exists() else {}
-
-    auth_section = data.get("auth", {})
-    auth_section["admin_user"] = config.auth.admin_user
-    auth_section["admin_password_hash"] = password_hash
-    auth_section["jwt_secret"] = config.auth.jwt_secret
-    auth_section["session_hours"] = config.auth.session_hours
-    data["auth"] = auth_section
-
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(config_path, "w", encoding="utf-8") as f:
-        yaml.safe_dump(data, f, sort_keys=False)
-
-    config.auth.admin_password_hash = password_hash
+    next_token_version = config.auth.token_version + 1
+    persist_config({
+        "auth": {
+            "admin_user": config.auth.admin_user,
+            "admin_password_hash": password_hash,
+            "jwt_secret": config.auth.jwt_secret,
+            "session_hours": config.auth.session_hours,
+            "token_version": next_token_version,
+        }
+    })
 
 
 def _client_ip(request: Request) -> str:
@@ -140,6 +126,7 @@ async def login(payload: LoginRequest, request: Request):
     await _check_rate_limit(client_ip)
 
     if payload.username != config.auth.admin_user:
+        logger.warning("Login failed from %s reason=unknown_user username=%s", client_ip, payload.username)
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     initial_setup = False
@@ -158,6 +145,7 @@ async def login(payload: LoginRequest, request: Request):
         _persist_admin_password_hash(password_hash)
         initial_setup = True
     elif not verify_password(payload.password, config.auth.admin_password_hash):
+        logger.warning("Login failed from %s reason=bad_password username=%s", client_ip, payload.username)
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     user = {
@@ -165,6 +153,7 @@ async def login(payload: LoginRequest, request: Request):
         "role": UserRole.ADMIN.value,
     }
     token = create_token(user)
+    logger.info("Login succeeded from %s username=%s initial_setup=%s", client_ip, user["username"], initial_setup)
 
     return {
         "token": token,
@@ -192,9 +181,11 @@ async def change_password(
     if not config.auth.admin_password_hash or not verify_password(
         payload.old_password, config.auth.admin_password_hash
     ):
+        logger.warning("Password change failed username=%s reason=bad_current_password", current_user.get("username"))
         raise HTTPException(status_code=401, detail="Current password is incorrect")
 
     new_hash = hash_password(payload.new_password)
     _persist_admin_password_hash(new_hash)
+    logger.info("Password changed username=%s token_version=%s", current_user.get("username"), config.auth.token_version)
 
     return {"status": "ok", "message": "Password updated successfully"}

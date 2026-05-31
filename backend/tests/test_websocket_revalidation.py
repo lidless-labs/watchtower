@@ -31,6 +31,8 @@ from app.websocket import (
     revalidate_loop,
 )
 
+TEST_JWT_SECRET = "websocket-test-jwt-secret-32-bytes"
+
 
 class _FakeWS:
     """Stand-in for a real Starlette WebSocket inside the manager.
@@ -57,9 +59,12 @@ def _mint(role: str, *, exp_offset_seconds: int) -> str:
 
     Negative offsets produce already-expired tokens.
     """
+    config.auth.jwt_secret = TEST_JWT_SECRET
+    config.auth.token_version = 1
     payload = {
         "sub": f"user-{role}",
         "role": role,
+        "ver": config.auth.token_version,
         "exp": datetime.now(timezone.utc) + timedelta(seconds=exp_offset_seconds),
     }
     return jwt.encode(payload, config.auth.jwt_secret, algorithm="HS256")

@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 from pydantic import BaseModel
@@ -20,6 +21,10 @@ logger = logging.getLogger("watchtower.proxmox")
 _PROXMOX_NODE_FETCH_TIMEOUT = 30.0
 _PROXMOX_VM_BATCH_TIMEOUT = 120.0
 _PROXMOX_NODE_FETCH_CONCURRENCY = 5
+
+
+def _path_segment(value: str) -> str:
+    return quote(value, safe="")
 
 
 class ProxmoxNode(BaseModel):
@@ -136,7 +141,7 @@ class ProxmoxClient:
     async def get_node(self, node: str) -> ProxmoxNode | None:
         """Get single node status"""
         try:
-            data = await self._get(f"/nodes/{node}/status")
+            data = await self._get(f"/nodes/{_path_segment(node)}/status")
             node_data = data.get("data", {})
             node_data["node"] = node
             node_data["status"] = "online"
@@ -160,7 +165,7 @@ class ProxmoxClient:
         semaphore = asyncio.Semaphore(_PROXMOX_NODE_FETCH_CONCURRENCY)
 
         async def _fetch_node_instances(node_name: str, instance_type: str) -> list[ProxmoxVM]:
-            endpoint = f"/nodes/{node_name}/{instance_type}"
+            endpoint = f"/nodes/{_path_segment(node_name)}/{instance_type}"
             try:
                 async with semaphore:
                     data = await asyncio.wait_for(self._get(endpoint), timeout=_PROXMOX_NODE_FETCH_TIMEOUT)
@@ -239,7 +244,7 @@ class ProxmoxClient:
 
         # QEMU VMs
         try:
-            qemu_data = await self._get(f"/nodes/{node}/qemu")
+            qemu_data = await self._get(f"/nodes/{_path_segment(node)}/qemu")
             for vm in qemu_data.get("data", []):
                 vm["node"] = node
                 vm["type"] = "qemu"
@@ -249,7 +254,7 @@ class ProxmoxClient:
 
         # LXC containers
         try:
-            lxc_data = await self._get(f"/nodes/{node}/lxc")
+            lxc_data = await self._get(f"/nodes/{_path_segment(node)}/lxc")
             for ct in lxc_data.get("data", []):
                 ct["node"] = node
                 ct["type"] = "lxc"
@@ -269,7 +274,7 @@ class ProxmoxClient:
     async def get_node_storage(self, node: str) -> list[dict]:
         """Get storage for a specific node"""
         try:
-            data = await self._get(f"/nodes/{node}/storage")
+            data = await self._get(f"/nodes/{_path_segment(node)}/storage")
             storage_list = []
             for s in data.get("data", []):
                 storage_list.append({

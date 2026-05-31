@@ -9,11 +9,42 @@ from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+PLACEHOLDER_JWT_SECRETS = {
+    "",
+    "change-me-in-production",
+    "change-this-to-a-random-secret-in-production",
+    "change-this-to-random-string",
+}
+
+MIN_JWT_SECRET_BYTES = 32
+
+
 class AuthConfig(BaseModel):
     admin_user: str = "admin"
     admin_password_hash: str = ""
     jwt_secret: str = "change-me-in-production"
     session_hours: int = 24
+    token_version: int = Field(default=1, ge=1)
+
+
+def is_placeholder_jwt_secret(secret: str) -> bool:
+    """Return True when a configured JWT secret is a known unsafe placeholder."""
+    return secret.strip() in PLACEHOLDER_JWT_SECRETS
+
+
+def is_strong_jwt_secret(secret: str) -> bool:
+    """Return True when a secret is long enough for HS256 signing."""
+    return len(secret.encode("utf-8")) >= MIN_JWT_SECRET_BYTES
+
+
+def validate_jwt_secret_for_runtime(secret: str, *, dev_mode: bool) -> None:
+    """Raise if a non-dev runtime is configured with a weak JWT secret."""
+    if dev_mode or is_placeholder_jwt_secret(secret) or is_strong_jwt_secret(secret):
+        return
+
+    raise RuntimeError(
+        f"auth.jwt_secret must be at least {MIN_JWT_SECRET_BYTES} bytes in production"
+    )
 
 
 class LibreNMSConfig(BaseModel):
@@ -473,5 +504,6 @@ def persist_config(updates: dict) -> None:
     config_path.parent.mkdir(parents=True, exist_ok=True)
     with open(config_path, "w", encoding="utf-8") as f:
         yaml.safe_dump(merged, f, sort_keys=False)
+    config_path.chmod(0o600)
 
     _apply_config(validated)

@@ -9,9 +9,14 @@ from __future__ import annotations
 
 import httpx
 from typing import Any
+from urllib.parse import quote
 from pydantic import BaseModel
 
 from app.config import get_settings
+
+
+def _path_segment(value: str) -> str:
+    return quote(value, safe="")
 
 
 class NetdiscoDevice(BaseModel):
@@ -162,7 +167,7 @@ class NetdiscoClient:
     async def get_device(self, ip: str) -> NetdiscoDevice | None:
         """Get device by IP address"""
         try:
-            data = await self._get(f"/object/device/{ip}")
+            data = await self._get(f"/object/device/{_path_segment(ip)}")
             return NetdiscoDevice(**data) if data else None
         except httpx.HTTPStatusError:
             return None
@@ -170,7 +175,7 @@ class NetdiscoClient:
     async def get_device_ports(self, ip: str) -> list[NetdiscoPort]:
         """Get all ports for a device"""
         try:
-            data = await self._get(f"/object/device/{ip}/ports")
+            data = await self._get(f"/object/device/{_path_segment(ip)}/ports")
             return [NetdiscoPort(**p) for p in data] if isinstance(data, list) else []
         except httpx.HTTPStatusError:
             return []

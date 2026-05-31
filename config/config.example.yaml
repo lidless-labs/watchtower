@@ -5,7 +5,7 @@
 auth:
   admin_user: admin
   admin_password_hash: ""
-  # Set via first-login bootstrap or WATCHTOWER_ADMIN_PASSWORD env var
+  # Generated on startup if left as a known placeholder.
   jwt_secret: "change-this-to-a-random-secret-in-production"
   session_hours: 24
 

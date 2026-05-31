@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -24,6 +23,7 @@ from app.polling.speedtest import (
     log_to_csv,
     get_status,
 )
+from app.safe_exports import validate_csv_export_path
 from app.websocket import ws_manager
 
 router = APIRouter(prefix="/speedtest", tags=["speedtest"])
@@ -132,13 +132,7 @@ async def export_csv() -> FileResponse:
             detail="CSV logging is not enabled",
         )
 
-    csv_path = Path(speedtest_config.logging.path)
-
-    if not csv_path.exists():
-        raise HTTPException(
-            status_code=404,
-            detail="No speedtest history available yet",
-        )
+    csv_path = validate_csv_export_path(speedtest_config.logging.path)
 
     today = datetime.utcnow().strftime("%Y-%m-%d")
     return FileResponse(

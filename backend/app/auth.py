@@ -34,11 +34,14 @@ def verify_password(password: str, password_hash: str) -> bool:
 
 def create_token(user: dict) -> str:
     """Create a signed JWT for a user."""
-    expires_at = datetime.now(timezone.utc) + timedelta(hours=config.auth.session_hours)
+    issued_at = datetime.now(timezone.utc)
+    expires_at = issued_at + timedelta(hours=config.auth.session_hours)
     payload = {
         "sub": user["username"],
         "role": user["role"],
+        "iat": issued_at,
         "exp": expires_at,
+        "ver": config.auth.token_version,
     }
     return jwt.encode(payload, config.auth.jwt_secret, algorithm="HS256")
 
@@ -51,6 +54,11 @@ def decode_token(token: str) -> dict:
         role = payload.get("role")
         if not username or not role:
             raise HTTPException(status_code=401, detail="Invalid token payload")
+
+        token_version = payload.get("ver")
+        if token_version != config.auth.token_version:
+            raise HTTPException(status_code=401, detail="Token has been invalidated")
+
         return {"username": username, "role": role}
     except jwt.ExpiredSignatureError as exc:
         raise HTTPException(status_code=401, detail="Token has expired") from exc

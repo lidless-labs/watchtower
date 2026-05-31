@@ -15,6 +15,7 @@ NC='\033[0m'
 
 APP_DIR="/opt/watchtower"
 APP_USER="watchtower"
+BOOTSTRAP_ENV="/etc/watchtower/bootstrap.env"
 
 echo -e "${CYAN}"
 echo "╔═══════════════════════════════════════════╗"
@@ -56,13 +57,17 @@ if [[ "$OS" == "debian" ]] || [[ "$OS" == "ubuntu" ]]; then
         ca-certificates \
         openssh-server
 
-    # Enable SSH password authentication (Ubuntu 24.04 disables by default)
-    echo -e "${GREEN}Configuring SSH...${NC}"
-    sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
-    sed -i 's/^#*PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
-    # Ubuntu 24.04 uses a drop-in that overrides - disable it
-    if [[ -f /etc/ssh/sshd_config.d/60-cloudimg-settings.conf ]]; then
-        sed -i 's/^PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config.d/60-cloudimg-settings.conf
+    echo -e "${GREEN}Ensuring SSH service is installed...${NC}"
+    if [[ "${WATCHTOWER_ENABLE_SSH_PASSWORD_LOGIN:-false}" == "true" ]]; then
+        echo -e "${YELLOW}WATCHTOWER_ENABLE_SSH_PASSWORD_LOGIN=true, enabling SSH password auth and root login...${NC}"
+        sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+        sed -i 's/^#*PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
+        # Ubuntu 24.04 uses a drop-in that overrides - disable it
+        if [[ -f /etc/ssh/sshd_config.d/60-cloudimg-settings.conf ]]; then
+            sed -i 's/^PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config.d/60-cloudimg-settings.conf
+        fi
+    else
+        echo -e "${YELLOW}Leaving SSH authentication defaults unchanged. Set WATCHTOWER_ENABLE_SSH_PASSWORD_LOGIN=true to opt in.${NC}"
     fi
     systemctl enable ssh
     systemctl restart ssh
@@ -117,6 +122,22 @@ if [[ ! -f "$APP_DIR/config/config.yaml" ]]; then
     echo -e "\n${GREEN}=== Creating Configuration ===${NC}"
     cp $APP_DIR/config/config.example.yaml $APP_DIR/config/config.yaml
     chown $APP_USER:$APP_USER $APP_DIR/config/config.yaml
+    chmod 600 $APP_DIR/config/config.yaml
+fi
+
+# Create runtime data directories used by configured CSV logging.
+install -d -o $APP_USER -g $APP_USER -m 750 /opt/watchtower/data /var/lib/watchtower
+
+# Production first-login bootstrap requires an out-of-band token. The token is
+# only honored while the admin password hash is empty.
+echo -e "\n${GREEN}=== Creating Bootstrap Token ===${NC}"
+install -d -o root -g root -m 700 /etc/watchtower
+if [[ ! -f "$BOOTSTRAP_ENV" ]]; then
+    BOOTSTRAP_TOKEN=$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')
+    printf 'WATCHTOWER_BOOTSTRAP_TOKEN=%s\n' "$BOOTSTRAP_TOKEN" > "$BOOTSTRAP_ENV"
+    chmod 600 "$BOOTSTRAP_ENV"
+else
+    BOOTSTRAP_TOKEN=$(sed -n 's/^WATCHTOWER_BOOTSTRAP_TOKEN=//p' "$BOOTSTRAP_ENV" | head -n1)
 fi
 
 # Create systemd service for backend
@@ -132,9 +153,21 @@ User=$APP_USER
 Group=$APP_USER
 WorkingDirectory=$APP_DIR/backend
 Environment=PATH=$APP_DIR/backend/venv/bin:/usr/bin
+EnvironmentFile=-$BOOTSTRAP_ENV
 ExecStart=$APP_DIR/backend/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
 Restart=always
 RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=$APP_DIR/config $APP_DIR/data /var/lib/watchtower
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+SystemCallArchitectures=native
 
 [Install]
 WantedBy=multi-user.target
@@ -146,6 +179,12 @@ cat > /etc/nginx/sites-available/watchtower << 'EOF'
 server {
     listen 80;
     server_name _;
+
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "no-referrer" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+    add_header Content-Security-Policy "default-src 'self'; connect-src 'self' ws: wss: https://vitals.vercel-insights.com; img-src 'self' data:; font-src 'self' https://fonts.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; script-src 'self' https://cdn.jsdelivr.net" always;
 
     # Frontend (production build)
     location / {
@@ -176,6 +215,11 @@ server {
 
     # Health check
     location /health {
+        proxy_pass http://127.0.0.1:8000;
+    }
+
+    # Readiness check
+    location /ready {
         proxy_pass http://127.0.0.1:8000;
     }
 }
@@ -217,8 +261,10 @@ echo -e "${CYAN}║       Installation Complete!              ║${NC}"
 echo -e "${CYAN}╚═══════════════════════════════════════════╝${NC}"
 echo ""
 echo -e "Access Watchtower at: ${GREEN}http://$IP_ADDR${NC}"
+echo -e "First login URL: ${GREEN}http://$IP_ADDR/?bootstrap_token=$BOOTSTRAP_TOKEN${NC}"
 echo ""
 echo -e "${YELLOW}Configuration:${NC} $APP_DIR/config/config.yaml"
+echo -e "${YELLOW}Bootstrap token file:${NC} $BOOTSTRAP_ENV"
 echo -e "${YELLOW}Logs:${NC} journalctl -u watchtower -f"
 echo ""
 echo -e "${YELLOW}Commands:${NC}"

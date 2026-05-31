@@ -11,6 +11,9 @@ export default function LoginPage({ showInitialSetupMessage = false }: LoginPage
 
   const [username, setUsername] = useState('admin')
   const [password, setPassword] = useState('')
+  const [bootstrapToken, setBootstrapToken] = useState(() => (
+    new URLSearchParams(window.location.search).get('bootstrap_token') || ''
+  ))
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [showSetupToast, setShowSetupToast] = useState(showInitialSetupMessage)
@@ -25,7 +28,7 @@ export default function LoginPage({ showInitialSetupMessage = false }: LoginPage
     setError(null)
 
     try {
-      await login(username, password)
+      await login(username, password, bootstrapToken.trim() || undefined)
     } catch (err) {
       const apiError = err as AxiosError<{ detail?: string }>
       setError(apiError.response?.data?.detail || 'Login failed. Check your credentials.')
@@ -89,6 +92,22 @@ export default function LoginPage({ showInitialSetupMessage = false }: LoginPage
               required
             />
           </div>
+
+          {bootstrapToken && (
+            <div>
+              <label htmlFor="bootstrap-token" className="block text-sm text-text-secondary mb-1">
+                Bootstrap token
+              </label>
+              <input
+                id="bootstrap-token"
+                type="password"
+                value={bootstrapToken}
+                onChange={(e) => setBootstrapToken(e.target.value)}
+                className="w-full bg-bg-primary border border-border-default rounded-lg px-3 py-2 text-text-primary focus:outline-none focus:ring-2 focus:ring-accent-cyan/40"
+                autoComplete="off"
+              />
+            </div>
+          )}
 
           <button
             type="submit"

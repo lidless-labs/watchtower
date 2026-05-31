@@ -10,9 +10,14 @@ Covers:
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
+import yaml
 from fastapi import FastAPI, HTTPException
 from httpx import ASGITransport, AsyncClient
+
+TEST_JWT_SECRET = "test-jwt-secret-32-bytes-minimum"
 
 
 def _make_client(app: FastAPI) -> AsyncClient:
@@ -42,7 +47,8 @@ def app(wired_redis_cache, monkeypatch, tmp_path):
     # Reset auth state to a known baseline.
     config_module.config.auth.admin_user = "admin"
     config_module.config.auth.admin_password_hash = auth_module.hash_password("correct-horse-battery")
-    config_module.config.auth.jwt_secret = "test-secret-not-the-default"
+    config_module.config.auth.jwt_secret = TEST_JWT_SECRET
+    config_module.config.auth.token_version = 1
     config_module.config.auth.session_hours = 1
 
     application = FastAPI()
@@ -60,7 +66,8 @@ def test_create_and_decode_token_roundtrip(wired_redis_cache):
     from app import auth as auth_module
     from app import config as config_module
 
-    config_module.config.auth.jwt_secret = "rt-secret"
+    config_module.config.auth.jwt_secret = TEST_JWT_SECRET
+    config_module.config.auth.token_version = 1
     token = auth_module.create_token({"username": "admin", "role": "admin"})
     decoded = auth_module.decode_token(token)
     assert decoded == {"username": "admin", "role": "admin"}
@@ -73,10 +80,11 @@ def test_decode_token_rejects_wrong_signature():
     from app import auth as auth_module
     from app import config as config_module
 
-    config_module.config.auth.jwt_secret = "the-real-secret"
+    config_module.config.auth.jwt_secret = TEST_JWT_SECRET
+    config_module.config.auth.token_version = 1
     forged = jwt.encode(
-        {"sub": "admin", "role": "admin", "exp": 9999999999},
-        "guessed-secret",
+        {"sub": "admin", "role": "admin", "exp": 9999999999, "ver": 1},
+        "different-test-jwt-secret-32-bytes",
         algorithm="HS256",
     )
     with pytest.raises(HTTPException) as exc:
@@ -90,10 +98,26 @@ def test_decode_token_rejects_payload_without_role():
     from app import auth as auth_module
     from app import config as config_module
 
-    config_module.config.auth.jwt_secret = "secret-x"
-    bad = jwt.encode({"sub": "admin", "exp": 9999999999}, "secret-x", algorithm="HS256")
+    config_module.config.auth.jwt_secret = TEST_JWT_SECRET
+    config_module.config.auth.token_version = 1
+    bad = jwt.encode({"sub": "admin", "exp": 9999999999, "ver": 1}, TEST_JWT_SECRET, algorithm="HS256")
     with pytest.raises(HTTPException) as exc:
         auth_module.decode_token(bad)
+    assert exc.value.status_code == 401
+
+
+def test_decode_token_rejects_invalidated_version():
+    from app import auth as auth_module
+    from app import config as config_module
+
+    config_module.config.auth.jwt_secret = TEST_JWT_SECRET
+    config_module.config.auth.token_version = 1
+    token = auth_module.create_token({"username": "admin", "role": "admin"})
+
+    config_module.config.auth.token_version = 2
+
+    with pytest.raises(HTTPException) as exc:
+        auth_module.decode_token(token)
     assert exc.value.status_code == 401
 
 
@@ -177,7 +201,8 @@ async def test_change_password_requires_old_password(client, app):
 
     # Issue a valid admin token without going through /login (avoid extra
     # rate-limit pressure in tests that share the same fakeredis bucket).
-    config_module.config.auth.jwt_secret = "cp-secret"
+    config_module.config.auth.jwt_secret = TEST_JWT_SECRET
+    config_module.config.auth.token_version = 1
     token = auth_module.create_token({"username": "admin", "role": "admin"})
     headers = {"Authorization": f"Bearer {token}"}
 
@@ -196,13 +221,23 @@ async def test_change_password_requires_old_password(client, app):
     assert r_ok.status_code == 200
     # Hash should now verify the new password.
     assert auth_module.verify_password("ANewLongerPw1", config_module.config.auth.admin_password_hash)
+    assert config_module.config.auth.token_version == 2
+    persisted = Path(config_module.settings.config_path)
+    on_disk = yaml.safe_load(persisted.read_text())
+    assert auth_module.verify_password("ANewLongerPw1", on_disk["auth"]["admin_password_hash"])
+    assert on_disk["auth"]["token_version"] == 2
+    assert (persisted.stat().st_mode & 0o777) == 0o600
+
+    r_old_token = await client.get("/api/auth/me", headers=headers)
+    assert r_old_token.status_code == 401
 
 
 async def test_change_password_rejects_short_new_password(client):
     from app import auth as auth_module
     from app import config as config_module
 
-    config_module.config.auth.jwt_secret = "cp-secret-2"
+    config_module.config.auth.jwt_secret = TEST_JWT_SECRET
+    config_module.config.auth.token_version = 1
     token = auth_module.create_token({"username": "admin", "role": "admin"})
     headers = {"Authorization": f"Bearer {token}"}
 

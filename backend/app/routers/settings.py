@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any
+import ipaddress
+import logging
+from typing import Any, get_args, get_origin
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
@@ -10,9 +12,15 @@ from pydantic import BaseModel, ConfigDict
 
 from ..auth import UserRole, get_current_user
 from ..cache import redis_cache
-from ..config import get_config, get_config_dict, mask_secrets, persist_config
+from ..config import AppConfig, get_config, get_config_dict, mask_secrets, persist_config
 
 router = APIRouter(prefix="/settings", tags=["settings"])
+logger = logging.getLogger(__name__)
+
+_METADATA_HOSTS = {
+    "169.254.169.254",
+    "metadata.google.internal",
+}
 
 
 class ConnectionTestRequest(BaseModel):
@@ -29,11 +37,107 @@ def _join_url(base_url: str, path: str) -> str:
     return f"{base_url.rstrip('/')}{path}"
 
 
+def _nested_model_type(annotation: Any) -> type[BaseModel] | None:
+    origin = get_origin(annotation)
+    args = get_args(annotation)
+
+    if origin is dict:
+        return None
+
+    if origin in {list, tuple} and args:
+        return _nested_model_type(args[0])
+
+    if origin is not None and args:
+        for arg in args:
+            nested = _nested_model_type(arg)
+            if nested:
+                return nested
+        return None
+
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return annotation
+
+    return None
+
+
+def _reject_unknown_settings_keys(model_type: type[BaseModel], data: Any, path: str = "") -> None:
+    if not isinstance(data, dict):
+        return
+
+    for key, value in data.items():
+        field = model_type.model_fields.get(key)
+        if field is None:
+            raise HTTPException(status_code=400, detail=f"Unknown settings key: {path}{key}")
+
+        nested_model = _nested_model_type(field.annotation)
+        if nested_model and isinstance(value, dict):
+            _reject_unknown_settings_keys(nested_model, value, f"{path}{key}.")
+        elif nested_model and isinstance(value, list):
+            for index, item in enumerate(value):
+                _reject_unknown_settings_keys(nested_model, item, f"{path}{key}[{index}].")
+
+
+def _validate_settings_update(updates: Any) -> dict[str, Any]:
+    if not isinstance(updates, dict):
+        raise HTTPException(status_code=400, detail="Settings update must be an object")
+    _reject_unknown_settings_keys(AppConfig, updates)
+    return updates
+
+
+def _validate_settings_section(section: str, body: Any) -> dict[str, Any]:
+    field = AppConfig.model_fields.get(section)
+    if field is None:
+        raise HTTPException(status_code=404, detail="Settings section not found")
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Settings section update must be an object")
+
+    nested_model = _nested_model_type(field.annotation)
+    if nested_model:
+        _reject_unknown_settings_keys(nested_model, body, f"{section}.")
+    return body
+
+
+def _validated_base_url(raw_url: Any) -> str:
+    url_text = str(raw_url or "").strip()
+    if not url_text:
+        raise HTTPException(status_code=400, detail="url is required")
+
+    try:
+        parsed = httpx.URL(url_text)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail="url must be a valid HTTP(S) URL") from exc
+
+    if parsed.scheme not in {"http", "https"} or not parsed.host:
+        raise HTTPException(status_code=400, detail="url must be a valid HTTP(S) URL")
+
+    if parsed.username or parsed.password:
+        raise HTTPException(status_code=400, detail="url must not include embedded credentials")
+
+    host = (parsed.host or "").strip("[]").lower()
+    if host in _METADATA_HOSTS:
+        raise HTTPException(status_code=400, detail="url host is not allowed")
+
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        address = None
+
+    if address and (
+        address.is_link_local
+        or address.is_multicast
+        or address.is_reserved
+        or address.is_unspecified
+    ):
+        raise HTTPException(status_code=400, detail="url host is not allowed")
+
+    return url_text
+
+
 async def _test_librenms(payload: dict[str, Any]) -> dict[str, Any]:
-    url = payload.get("url", "")
+    url = _validated_base_url(payload.get("url"))
     api_key = payload.get("api_key", "")
-    if not url or not api_key:
-        raise HTTPException(status_code=400, detail="url and api_key are required")
+    if not api_key:
+        raise HTTPException(status_code=400, detail="api_key is required")
 
     async with httpx.AsyncClient(timeout=10.0, verify=payload.get("verify_ssl", True)) as client:
         response = await client.get(
@@ -46,11 +150,11 @@ async def _test_librenms(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 async def _test_proxmox(payload: dict[str, Any]) -> dict[str, Any]:
-    url = payload.get("url", "")
+    url = _validated_base_url(payload.get("url"))
     token_id = payload.get("token_id", "")
     token_secret = payload.get("token_secret", "")
-    if not url or not token_id or not token_secret:
-        raise HTTPException(status_code=400, detail="url, token_id, and token_secret are required")
+    if not token_id or not token_secret:
+        raise HTTPException(status_code=400, detail="token_id and token_secret are required")
 
     token = f"PVEAPIToken={token_id}={token_secret}"
 
@@ -65,9 +169,7 @@ async def _test_proxmox(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 async def _test_influxdb(payload: dict[str, Any]) -> dict[str, Any]:
-    url = payload.get("url", "")
-    if not url:
-        raise HTTPException(status_code=400, detail="url is required")
+    url = _validated_base_url(payload.get("url"))
 
     headers: dict[str, str] = {}
     token = payload.get("token")
@@ -82,9 +184,7 @@ async def _test_influxdb(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 async def _test_netdisco(payload: dict[str, Any]) -> dict[str, Any]:
-    url = payload.get("url", "")
-    if not url:
-        raise HTTPException(status_code=400, detail="url is required")
+    url = _validated_base_url(payload.get("url"))
 
     headers: dict[str, str] = {}
     api_key = payload.get("api_key", "")
@@ -162,7 +262,13 @@ async def put_settings(
 ):
     _require_admin(current_user)
 
-    persist_config(body)
+    updates = _validate_settings_update(body)
+    logger.info(
+        "settings update by %s sections=%s",
+        current_user.get("username", "unknown"),
+        sorted(updates.keys()),
+    )
+    persist_config(updates)
     return mask_secrets(get_config_dict())
 
 
@@ -174,7 +280,14 @@ async def patch_settings_section(
 ):
     _require_admin(current_user)
 
-    persist_config({section: body})
+    updates = _validate_settings_section(section, body)
+    logger.info(
+        "settings section update by %s section=%s keys=%s",
+        current_user.get("username", "unknown"),
+        section,
+        sorted(updates.keys()),
+    )
+    persist_config({section: updates})
     return mask_secrets(get_config_dict())
 
 
@@ -186,6 +299,11 @@ async def test_connection(
     _require_admin(current_user)
 
     data = payload.model_dump()
+    logger.info(
+        "settings connection test by %s type=%s",
+        current_user.get("username", "unknown"),
+        data.get("type", ""),
+    )
     return await _run_connection_test(data)
 
 

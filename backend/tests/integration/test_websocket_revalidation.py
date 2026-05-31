@@ -36,6 +36,8 @@ from app.websocket import (
 
 pytestmark = pytest.mark.integration
 
+TEST_JWT_SECRET = "websocket-int-jwt-secret-32-bytes"
+
 
 @pytest.fixture
 async def ws_url():
@@ -81,9 +83,12 @@ async def ws_url():
 
 def _token_with_exp(role: str, exp_offset_seconds: int) -> str:
     """Mint a JWT signed with the live secret expiring at now+offset."""
+    config.auth.jwt_secret = TEST_JWT_SECRET
+    config.auth.token_version = 1
     payload = {
         "sub": f"user-{role}",
         "role": role,
+        "ver": config.auth.token_version,
         "exp": datetime.now(timezone.utc) + timedelta(seconds=exp_offset_seconds),
     }
     return jwt.encode(payload, config.auth.jwt_secret, algorithm="HS256")

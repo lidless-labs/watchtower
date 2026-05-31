@@ -9,9 +9,14 @@ from __future__ import annotations
 
 import httpx
 from typing import Any
+from urllib.parse import quote
 from pydantic import BaseModel
 
 from app.config import get_settings
+
+
+def _path_segment(value: int | str) -> str:
+    return quote(str(value), safe="")
 
 
 class LibreNMSDevice(BaseModel):
@@ -152,7 +157,7 @@ class LibreNMSClient:
     async def get_device(self, device_id: int | str) -> LibreNMSDevice | None:
         """Get single device by ID or hostname"""
         try:
-            data = await self._get(f"/devices/{device_id}")
+            data = await self._get(f"/devices/{_path_segment(device_id)}")
             devices = data.get("devices", [])
             return LibreNMSDevice(**devices[0]) if devices else None
         except httpx.HTTPStatusError:
@@ -173,7 +178,7 @@ class LibreNMSClient:
         params = {"columns": columns}
 
         if device_id:
-            data = await self._get(f"/devices/{device_id}/ports", params=params)
+            data = await self._get(f"/devices/{_path_segment(device_id)}/ports", params=params)
         else:
             data = await self._get("/ports", params=params)
         return [LibreNMSPort(**p) for p in data.get("ports", [])]
