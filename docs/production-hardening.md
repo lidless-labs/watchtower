@@ -48,11 +48,19 @@ curl -fsS http://127.0.0.1:8000/ready
 journalctl -u watchtower -n 100 --no-pager
 ```
 
+Use the live smoke script once you have an admin token or credentials:
+
+```bash
+scripts/smoke-live.sh --base-url http://127.0.0.1:8000 --token "$WATCHTOWER_TOKEN"
+```
+
 After logging in as admin, check `/api/diagnostics/system` for Redis, config file, scheduler, and runtime details. The endpoint is admin-only and redacts secrets.
 
 ## Upgrade Flow
 
 1. Back up `/opt/watchtower/config/config.yaml`.
-2. Run the installer with the target `WATCHTOWER_REPO_REF` or source directory.
-3. Confirm `/health`, `/ready`, and `/api/diagnostics/system`.
-4. Review `journalctl -u watchtower -n 100 --no-pager` before leaving the host.
+2. Run `scripts/backup.sh` for a full config, bootstrap token, and runtime-data archive.
+3. Run the installer with the target `WATCHTOWER_REPO_REF` or source directory.
+4. Confirm `/health`, `/ready`, and `/api/diagnostics/system`.
+5. Run `scripts/smoke-live.sh`.
+6. Review `journalctl -u watchtower -n 100 --no-pager` before leaving the host.

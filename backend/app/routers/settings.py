@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict
 from ..auth import UserRole, get_current_user
 from ..cache import redis_cache
 from ..config import AppConfig, get_config, get_config_dict, mask_secrets, persist_config
+from ..logging_utils import log_event
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 logger = logging.getLogger(__name__)
@@ -263,10 +264,12 @@ async def put_settings(
     _require_admin(current_user)
 
     updates = _validate_settings_update(body)
-    logger.info(
-        "settings update by %s sections=%s",
-        current_user.get("username", "unknown"),
-        sorted(updates.keys()),
+    log_event(
+        logger,
+        logging.INFO,
+        "settings.update",
+        username=current_user.get("username", "unknown"),
+        sections=",".join(sorted(updates.keys())),
     )
     persist_config(updates)
     return mask_secrets(get_config_dict())
@@ -281,11 +284,13 @@ async def patch_settings_section(
     _require_admin(current_user)
 
     updates = _validate_settings_section(section, body)
-    logger.info(
-        "settings section update by %s section=%s keys=%s",
-        current_user.get("username", "unknown"),
-        section,
-        sorted(updates.keys()),
+    log_event(
+        logger,
+        logging.INFO,
+        "settings.section_update",
+        username=current_user.get("username", "unknown"),
+        section=section,
+        keys=",".join(sorted(updates.keys())),
     )
     persist_config({section: updates})
     return mask_secrets(get_config_dict())
@@ -299,10 +304,12 @@ async def test_connection(
     _require_admin(current_user)
 
     data = payload.model_dump()
-    logger.info(
-        "settings connection test by %s type=%s",
-        current_user.get("username", "unknown"),
-        data.get("type", ""),
+    log_event(
+        logger,
+        logging.INFO,
+        "settings.connection_test",
+        username=current_user.get("username", "unknown"),
+        integration_type=data.get("type", ""),
     )
     return await _run_connection_test(data)
 

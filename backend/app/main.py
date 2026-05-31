@@ -1,5 +1,6 @@
 """Watchtower NOC Dashboard - FastAPI Application."""
 
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI
@@ -17,6 +18,7 @@ from .config import (
     validate_jwt_secret_for_runtime,
 )
 from .polling import scheduler
+from .logging_utils import log_event
 from .routers import alerts_router, devices_router, topology_router, history_router, settings_router
 from .routers.alerts import shutdown_notification_worker
 from .routers.auth_router import router as auth_router
@@ -30,16 +32,17 @@ from .routers.ports import router as ports_router
 from .routers.notifications import router as notifications_router
 from .websocket import revalidate_loop, websocket_endpoint, ws_manager
 
+logger = logging.getLogger("watchtower.runtime")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan - startup and shutdown events."""
     import asyncio
     import contextlib
-    import logging
     import secrets
 
-    logger = logging.getLogger("watchtower.startup")
+    startup_logger = logging.getLogger("watchtower.startup")
 
     # Startup
     await redis_cache.connect()
@@ -49,17 +52,20 @@ async def lifespan(app: FastAPI):
         generated = secrets.token_urlsafe(32)
         try:
             persist_config({"auth": {"jwt_secret": generated}})
-            logger.warning(
-                "JWT secret was the default placeholder; generated a "
-                "random one and persisted it to config.yaml."
+            log_event(
+                startup_logger,
+                logging.WARNING,
+                "startup.jwt_secret_generated",
+                persisted=True,
             )
         except Exception as exc:
             config.auth.jwt_secret = generated
-            logger.critical(
-                "JWT secret was the default placeholder; persist failed "
-                "(%s). Using random secret for THIS session only. Sessions "
-                "will NOT survive a restart until config.yaml is writable.",
-                exc,
+            log_event(
+                startup_logger,
+                logging.CRITICAL,
+                "startup.jwt_secret_generated",
+                persisted=False,
+                error=exc.__class__.__name__,
             )
 
     validate_jwt_secret_for_runtime(config.auth.jwt_secret, dev_mode=settings.dev_mode)
@@ -179,6 +185,9 @@ async def readiness_check():
         checks["redis"] = {"ok": False, "error": exc.__class__.__name__}
 
     ready = all(bool(check["ok"]) for check in checks.values())
+    if not ready:
+        failed = ",".join(name for name, check in checks.items() if not check["ok"])
+        log_event(logger, logging.WARNING, "readiness.failed", failed_checks=failed)
     status_code = 200 if ready else 503
     return JSONResponse(
         status_code=status_code,

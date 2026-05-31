@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from ..auth import UserRole, create_token, get_current_user, hash_password, verify_password
 from ..config import config, persist_config, settings
+from ..logging_utils import log_event
 from ..ratelimit import sliding_window_check
 
 logger = logging.getLogger(__name__)
@@ -42,7 +43,7 @@ async def _check_bootstrap_rate_limit(ip: str) -> None:
         _BOOTSTRAP_RATE_LIMIT_WINDOW,
     )
     if not allowed:
-        _log_bootstrap_attempt(ip, False, "rate limited")
+        _log_bootstrap_attempt(ip, False, "rate_limited")
         raise HTTPException(status_code=429, detail="Too many bootstrap attempts. Try again later.")
 
 
@@ -89,12 +90,14 @@ def _extract_bootstrap_token(request: Request) -> str:
 
 
 def _log_bootstrap_attempt(ip: str, allowed: bool, reason: str) -> None:
-    logger.warning(
-        "Bootstrap login attempt from %s at %s allowed=%s reason=%s",
-        ip,
-        datetime.now(timezone.utc).isoformat(),
-        allowed,
-        reason,
+    log_event(
+        logger,
+        logging.WARNING,
+        "auth.bootstrap_attempt",
+        ip=ip,
+        allowed=allowed,
+        reason=reason,
+        timestamp=datetime.now(timezone.utc).isoformat(),
     )
 
 
@@ -111,10 +114,10 @@ def _authorize_bootstrap(request: Request, client_ip: str) -> None:
         return
 
     if bootstrap_env_token and provided_token == bootstrap_env_token:
-        _log_bootstrap_attempt(client_ip, True, "valid bootstrap token")
+        _log_bootstrap_attempt(client_ip, True, "valid_bootstrap_token")
         return
 
-    reason = "missing bootstrap token" if bootstrap_env_token else "bootstrap requires WATCHTOWER_BOOTSTRAP_TOKEN in production"
+    reason = "missing_bootstrap_token" if bootstrap_env_token else "bootstrap_token_not_configured"
     _log_bootstrap_attempt(client_ip, False, reason)
     raise HTTPException(status_code=403, detail="First-login bootstrap is restricted")
 
@@ -126,7 +129,7 @@ async def login(payload: LoginRequest, request: Request):
     await _check_rate_limit(client_ip)
 
     if payload.username != config.auth.admin_user:
-        logger.warning("Login failed from %s reason=unknown_user username=%s", client_ip, payload.username)
+        log_event(logger, logging.WARNING, "auth.login_failed", ip=client_ip, reason="unknown_user", username=payload.username)
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     initial_setup = False
@@ -140,12 +143,12 @@ async def login(payload: LoginRequest, request: Request):
                 status_code=400,
                 detail="Password must be at least 8 characters for initial setup.",
             )
-        logger.warning("Initial admin password set via first-login bootstrap from %s", client_ip)
+        log_event(logger, logging.WARNING, "auth.initial_password_set", ip=client_ip, username=config.auth.admin_user)
         password_hash = hash_password(payload.password)
         _persist_admin_password_hash(password_hash)
         initial_setup = True
     elif not verify_password(payload.password, config.auth.admin_password_hash):
-        logger.warning("Login failed from %s reason=bad_password username=%s", client_ip, payload.username)
+        log_event(logger, logging.WARNING, "auth.login_failed", ip=client_ip, reason="bad_password", username=payload.username)
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     user = {
@@ -153,7 +156,14 @@ async def login(payload: LoginRequest, request: Request):
         "role": UserRole.ADMIN.value,
     }
     token = create_token(user)
-    logger.info("Login succeeded from %s username=%s initial_setup=%s", client_ip, user["username"], initial_setup)
+    log_event(
+        logger,
+        logging.INFO,
+        "auth.login_succeeded",
+        ip=client_ip,
+        username=user["username"],
+        initial_setup=initial_setup,
+    )
 
     return {
         "token": token,
@@ -181,11 +191,23 @@ async def change_password(
     if not config.auth.admin_password_hash or not verify_password(
         payload.old_password, config.auth.admin_password_hash
     ):
-        logger.warning("Password change failed username=%s reason=bad_current_password", current_user.get("username"))
+        log_event(
+            logger,
+            logging.WARNING,
+            "auth.password_change_failed",
+            username=current_user.get("username"),
+            reason="bad_current_password",
+        )
         raise HTTPException(status_code=401, detail="Current password is incorrect")
 
     new_hash = hash_password(payload.new_password)
     _persist_admin_password_hash(new_hash)
-    logger.info("Password changed username=%s token_version=%s", current_user.get("username"), config.auth.token_version)
+    log_event(
+        logger,
+        logging.INFO,
+        "auth.password_changed",
+        username=current_user.get("username"),
+        token_version=config.auth.token_version,
+    )
 
     return {"status": "ok", "message": "Password updated successfully"}

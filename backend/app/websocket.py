@@ -12,6 +12,7 @@ from fastapi import HTTPException, WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
 
 from .auth import UserRole, decode_token
+from .logging_utils import log_event
 
 logger = logging.getLogger(__name__)
 
@@ -378,6 +379,8 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     """WebSocket endpoint handler."""
     auth = await _authenticate_websocket(websocket)
     if not auth:
+        client = websocket.client.host if websocket.client else "unknown"
+        log_event(logger, logging.WARNING, "websocket.auth_failed", ip=client, reason="invalid_or_missing_token")
         await _close_unauthorized(websocket)
         return
 
@@ -387,6 +390,8 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     # subscription, so fail closed rather than silently letting the client
     # sit attached and receive nothing.
     if role not in ROLE_ALLOWED_MESSAGE_TYPES:
+        client = websocket.client.host if websocket.client else "unknown"
+        log_event(logger, logging.WARNING, "websocket.auth_failed", ip=client, reason="unknown_role", role=role)
         await _close_unauthorized(websocket)
         return
 
