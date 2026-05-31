@@ -68,9 +68,6 @@ export default function IntegrationsTab() {
   const saveSection = useSettingsApiStore((s) => s.saveSection)
   const markDirty = useSettingsApiStore((s) => s.markDirty)
 
-  const ds = settings?.data_sources || {}
-  const influx = settings?.influxdb || {}
-
   // Local form state
   const [librenms, setLibrenms] = useState({ url: '', api_key: '' })
   const [proxmox, setProxmox] = useState({ url: '', token_id: '', token_secret: '', verify_ssl: false })
@@ -78,6 +75,8 @@ export default function IntegrationsTab() {
   const [influxdb, setInfluxdb] = useState({ url: '', token: '', org: '', bucket: '', enabled: false })
 
   useEffect(() => {
+    const ds = settings?.data_sources || {}
+    const influx = settings?.influxdb || {}
     if (ds.librenms) setLibrenms({ url: ds.librenms.url || '', api_key: ds.librenms.api_key || '' })
     if (ds.proxmox) setProxmox({ url: ds.proxmox.url || '', token_id: ds.proxmox.token_id || '', token_secret: ds.proxmox.token_secret || '', verify_ssl: ds.proxmox.verify_ssl || false })
     if (ds.netdisco) setNetdisco({ url: ds.netdisco.url || '', api_key: ds.netdisco.api_key || '', username: ds.netdisco.username || '', password: ds.netdisco.password || '' })

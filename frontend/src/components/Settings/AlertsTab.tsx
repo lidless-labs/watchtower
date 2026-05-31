@@ -73,7 +73,7 @@ export default function AlertsTab() {
 
   useEffect(() => {
     if (settings?.alert_thresholds?.defaults) {
-      setThresholds({ ...thresholds, ...settings.alert_thresholds.defaults })
+      setThresholds((current) => ({ ...current, ...settings.alert_thresholds!.defaults }))
     }
   }, [settings])
 

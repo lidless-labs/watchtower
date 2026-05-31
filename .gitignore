@@ -43,6 +43,7 @@ frontend/dist/
 .coverage
 .nyc_output/
 coverage/
+test-results/
 __pycache__/
 **/__pycache__/
 *.pyc
