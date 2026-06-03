@@ -1,5 +1,6 @@
 """Authentication API routes."""
 
+import ipaddress
 import logging
 import os
 from datetime import datetime, timezone
@@ -71,11 +72,51 @@ def _persist_admin_password_hash(password_hash: str) -> None:
 
 
 def _client_ip(request: Request) -> str:
-    return request.client.host if request.client else "unknown"
+    peer = request.client.host if request.client else "unknown"
+    if _is_localhost(peer):
+        forwarded = _forwarded_client_ip(request)
+        if forwarded:
+            return forwarded
+    return peer
 
 
 def _is_localhost(ip: str) -> bool:
-    return ip in {"127.0.0.1", "::1", "localhost"}
+    if ip == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(ip).is_loopback
+    except ValueError:
+        return False
+
+
+def _parse_forwarded_ip(raw: str) -> str | None:
+    value = raw.strip()
+    if not value:
+        return None
+    if value.startswith("[") and "]" in value:
+        value = value[1:value.index("]")]
+    try:
+        return str(ipaddress.ip_address(value))
+    except ValueError:
+        return None
+
+
+def _forwarded_client_ip(request: Request) -> str | None:
+    real_ip = _parse_forwarded_ip(request.headers.get("X-Real-IP", ""))
+    if real_ip:
+        return real_ip
+
+    forwarded_for = request.headers.get("X-Forwarded-For", "")
+    if not forwarded_for:
+        return None
+    # nginx's $proxy_add_x_forwarded_for appends the immediate client to any
+    # existing header. The rightmost valid address is the least spoofable value
+    # available when X-Real-IP is missing.
+    for candidate in reversed(forwarded_for.split(",")):
+        parsed = _parse_forwarded_ip(candidate)
+        if parsed:
+            return parsed
+    return None
 
 
 def _extract_bootstrap_token(request: Request) -> str:

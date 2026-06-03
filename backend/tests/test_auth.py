@@ -158,6 +158,35 @@ async def test_login_rate_limit_kicks_in_after_threshold(client):
     )
 
 
+async def test_login_rate_limit_uses_forwarded_ip_from_loopback_proxy(client):
+    """Production nginx proxies every request from 127.0.0.1 to uvicorn.
+
+    The limiter should bucket by the forwarded client IP when the peer is the
+    trusted loopback proxy, otherwise one caller can lock out every user.
+    """
+    for _ in range(5):
+        r = await client.post(
+            "/api/auth/login",
+            json={"username": "admin", "password": "wrong"},
+            headers={"X-Real-IP": "198.51.100.10"},
+        )
+        assert r.status_code == 401
+
+    same_client = await client.post(
+        "/api/auth/login",
+        json={"username": "admin", "password": "wrong"},
+        headers={"X-Real-IP": "198.51.100.10"},
+    )
+    assert same_client.status_code == 429
+
+    different_client = await client.post(
+        "/api/auth/login",
+        json={"username": "admin", "password": "correct-horse-battery"},
+        headers={"X-Real-IP": "198.51.100.11"},
+    )
+    assert different_client.status_code == 200
+
+
 async def test_bootstrap_rate_limit_kicks_in(app, monkeypatch):
     """4 bootstrap attempts in <60s must hit the 3/60s bootstrap rate limit on the 4th.
 

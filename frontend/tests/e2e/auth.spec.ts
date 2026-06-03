@@ -29,6 +29,7 @@ test('first login sends bootstrap token header', async ({ page }) => {
   })
 
   await page.goto('/?bootstrap_token=bootstrap-secret')
+  await expect.poll(() => new URL(page.url()).searchParams.has('bootstrap_token')).toBe(false)
   await page.getByLabel('Password').fill('NewAdminPw123')
   await page.getByRole('button', { name: 'Sign in' }).click()
 

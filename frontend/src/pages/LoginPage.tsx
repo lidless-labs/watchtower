@@ -6,14 +6,22 @@ interface LoginPageProps {
   showInitialSetupMessage?: boolean
 }
 
+const BOOTSTRAP_TOKEN_STORAGE_KEY = 'watchtower_bootstrap_token'
+
+function initialBootstrapToken(): string {
+  return (
+    sessionStorage.getItem(BOOTSTRAP_TOKEN_STORAGE_KEY) ||
+    new URLSearchParams(window.location.search).get('bootstrap_token') ||
+    ''
+  )
+}
+
 export default function LoginPage({ showInitialSetupMessage = false }: LoginPageProps) {
   const login = useAuthStore((state) => state.login)
 
   const [username, setUsername] = useState('admin')
   const [password, setPassword] = useState('')
-  const [bootstrapToken, setBootstrapToken] = useState(() => (
-    new URLSearchParams(window.location.search).get('bootstrap_token') || ''
-  ))
+  const [bootstrapToken, setBootstrapToken] = useState(initialBootstrapToken)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [showSetupToast, setShowSetupToast] = useState(showInitialSetupMessage)
@@ -29,6 +37,7 @@ export default function LoginPage({ showInitialSetupMessage = false }: LoginPage
 
     try {
       await login(username, password, bootstrapToken.trim() || undefined)
+      sessionStorage.removeItem(BOOTSTRAP_TOKEN_STORAGE_KEY)
     } catch (err) {
       const apiError = err as AxiosError<{ detail?: string }>
       setError(apiError.response?.data?.detail || 'Login failed. Check your credentials.')

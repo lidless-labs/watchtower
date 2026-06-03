@@ -101,11 +101,12 @@ async def test_tampered_token_closes():
     manager = ConnectionManager()
     ws = _FakeWS()
     good = _mint(UserRole.ADMIN.value, exp_offset_seconds=3600)
-    # JWT format is header.payload.signature; mutate the last char of the
-    # signature segment so HS256 verification fails.
+    # JWT format is header.payload.signature. Mutate the first signature
+    # character: the last base64url character may only carry padding bits, so
+    # changing it can decode to identical bytes and leave verification valid.
     head, payload, sig = good.split(".")
-    flipped_char = "B" if sig[-1] != "B" else "C"
-    tampered = ".".join([head, payload, sig[:-1] + flipped_char])
+    flipped_char = "B" if sig[0] != "B" else "C"
+    tampered = ".".join([head, payload, flipped_char + sig[1:]])
     _attach(manager, ws, UserRole.ADMIN.value, tampered)
 
     await _revalidate_once(manager)
