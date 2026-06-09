@@ -18,6 +18,12 @@ MEMORY=2048
 CORES=2
 DISK=32
 
+# Ref the installer is fetched from and that the installer itself checks out.
+# Pin this to a release tag (e.g. v1.2.3) or commit SHA for reproducible,
+# tamper-evident installs; see docs/release.md.
+REPO_REF="${WATCHTOWER_REPO_REF:-main}"
+INSTALL_URL="https://raw.githubusercontent.com/solomonneas/watchtower/${REPO_REF}/install/install.sh"
+
 echo -e "${CYAN}"
 echo "╔═══════════════════════════════════════════╗"
 echo "║    Watchtower LXC Container Creator       ║"
@@ -184,11 +190,11 @@ fi
 
 # Create container
 echo -e "\n${GREEN}Creating LXC container...${NC}"
-pct create $CTID $TEMPLATE \
-    --hostname $HOSTNAME \
-    --memory $MEMORY \
-    --cores $CORES \
-    --rootfs $STORAGE:$DISK \
+pct create "$CTID" "$TEMPLATE" \
+    --hostname "$HOSTNAME" \
+    --memory "$MEMORY" \
+    --cores "$CORES" \
+    --rootfs "$STORAGE:$DISK" \
     --net0 "$NET_CONFIG" \
     --unprivileged 1 \
     --features nesting=1 \
@@ -197,12 +203,12 @@ pct create $CTID $TEMPLATE \
 
 # Start container
 echo -e "${GREEN}Starting container...${NC}"
-pct start $CTID
+pct start "$CTID"
 
 # Wait for network (IP)
 echo -e "${GREEN}Waiting for network...${NC}"
 for i in {1..30}; do
-    IP=$(pct exec $CTID -- hostname -I 2>/dev/null | awk '{print $1}')
+    IP=$(pct exec "$CTID" -- hostname -I 2>/dev/null | awk '{print $1}')
     if [[ -n "$IP" ]]; then
         break
     fi
@@ -219,7 +225,7 @@ echo -e "${GREEN}Container IP: $IP${NC}"
 # Wait for DNS to be ready
 echo -e "${GREEN}Waiting for DNS...${NC}"
 for i in {1..30}; do
-    if pct exec $CTID -- ping -c1 github.com &>/dev/null; then
+    if pct exec "$CTID" -- ping -c1 github.com &>/dev/null; then
         echo -e "${GREEN}DNS is ready${NC}"
         break
     fi
@@ -228,15 +234,17 @@ done
 
 # Update package lists first
 echo -e "\n${GREEN}Updating package lists...${NC}"
-pct exec $CTID -- apt-get update
+pct exec "$CTID" -- apt-get update
 
 # Install curl if not present
 echo -e "${GREEN}Ensuring curl is installed...${NC}"
-pct exec $CTID -- apt-get install -y curl
+pct exec "$CTID" -- apt-get install -y curl
 
-# Run installer
-echo -e "\n${GREEN}Running Watchtower installer...${NC}"
-if ! pct exec $CTID -- bash -c "curl -fsSL https://raw.githubusercontent.com/solomonneas/watchtower/main/install/install.sh | bash"; then
+# Run installer. Download to a file first (instead of curl | bash) so a
+# truncated transfer can never execute a half-fetched script, and pass the
+# same ref through so the installer checks out exactly what we fetched.
+echo -e "\n${GREEN}Running Watchtower installer (ref: $REPO_REF)...${NC}"
+if ! pct exec "$CTID" -- bash -c "set -euo pipefail; curl -fsSL '$INSTALL_URL' -o /tmp/watchtower-install.sh && WATCHTOWER_REPO_REF='$REPO_REF' bash /tmp/watchtower-install.sh"; then
     echo -e "${RED}Installer failed! Enter container to debug:${NC}"
     echo "  pct enter $CTID"
     exit 1
@@ -251,9 +259,9 @@ echo ""
 echo -e "${YELLOW}Container management:${NC}"
 echo "  pct enter $CTID              # Enter container shell"
 echo "  pct stop $CTID               # Stop container"
-echo "  pct start $CTID              # Start container"
+echo "  pct start "$CTID"              # Start container"
 echo "  pct destroy $CTID            # Delete container"
 echo ""
 echo -e "${YELLOW}Logs:${NC}"
-echo "  pct exec $CTID -- journalctl -u watchtower -f"
+echo "  pct exec "$CTID" -- journalctl -u watchtower -f"
 echo ""
