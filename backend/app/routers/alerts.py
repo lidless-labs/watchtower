@@ -21,8 +21,8 @@ router = APIRouter()
 
 # In-memory acknowledgment tracking (persists until service restart)
 _acknowledged_alerts: set[str] = set()
-# Track previously seen alert IDs for notification dispatch
-_previously_seen_alerts: set[str] = set()
+# Track previously seen active alerts (id -> device_id) for notification dispatch
+_previously_seen_alerts: dict[str, str] = {}
 
 _NOTIFICATION_QUEUE_MAXSIZE = 1000
 _NOTIFICATION_WORKER_CONCURRENCY = 5
@@ -108,9 +108,9 @@ def _enqueue_notification(job_factory: Callable[[], Awaitable[None]]) -> None:
 async def _notify_new_alerts(alerts: list[Alert]) -> None:
     """Queue notifications for newly appeared or resolved alerts."""
     global _previously_seen_alerts
-    current_ids = {a.id for a in alerts if a.status == AlertStatus.ACTIVE}
-    new_ids = current_ids - _previously_seen_alerts
-    resolved_ids = _previously_seen_alerts - current_ids
+    current_ids = {a.id: a.device_id for a in alerts if a.status == AlertStatus.ACTIVE}
+    new_ids = current_ids.keys() - _previously_seen_alerts.keys()
+    resolved_ids = _previously_seen_alerts.keys() - current_ids.keys()
 
     if not new_ids and not resolved_ids:
         _previously_seen_alerts = current_ids
@@ -141,11 +141,12 @@ async def _notify_new_alerts(alerts: list[Alert]) -> None:
         ))
 
     for alert_id in resolved_ids:
-        _enqueue_notification(lambda alert_id=alert_id: notification_service.dispatch(
+        device_id = _previously_seen_alerts.get(alert_id) or alert_id
+        _enqueue_notification(lambda alert_id=alert_id, device_id=device_id: notification_service.dispatch(
             alert_id=alert_id,
             alert_type="recovery",
             severity="info",
-            device=alert_id,
+            device=device_id,
             message=f"Alert resolved: {alert_id}",
             config=config_dict,
             is_recovery=True,
@@ -173,9 +174,9 @@ async def _get_device_down_alerts() -> list[Alert]:
                     status=AlertStatus.ACKNOWLEDGED if alert_id in _acknowledged_alerts else AlertStatus.ACTIVE,
                     timestamp=device.last_seen or datetime.utcnow(),
                 ))
-    except Exception as e:
+    except Exception:
         # Log but don't fail - we can still return LibreNMS alerts
-        print(f"Error getting device down alerts: {e}")
+        logger.exception("Error getting device down alerts")
 
     return alerts
 
@@ -218,8 +219,8 @@ async def _get_librenms_alerts() -> list[Alert]:
                 status=AlertStatus.ACKNOWLEDGED if alert_id in _acknowledged_alerts else AlertStatus.ACTIVE,
                 timestamp=timestamp,
             ))
-    except Exception as e:
-        print(f"Error getting LibreNMS alerts: {e}")
+    except Exception:
+        logger.exception("Error getting LibreNMS alerts")
 
     return alerts
 

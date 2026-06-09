@@ -309,7 +309,7 @@ class NotificationService:
             channel=channel, alert_id="test", alert_type="test_notification",
             severity="info", device="Watchtower Test", message="This is a test notification from Watchtower.",
             details="If you're seeing this, your notification channel is configured correctly.",
-            channel_cfg=channel_cfg, cooldown_min=0, demo=False, is_recovery=False,
+            channel_cfg=channel_cfg, cooldown_min=0, is_recovery=False,
         )
 
     def get_history(self, limit: int = 50) -> list[dict]:

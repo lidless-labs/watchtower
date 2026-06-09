@@ -175,8 +175,10 @@ async def readiness_check():
 
     try:
         validate_jwt_secret_for_runtime(config.auth.jwt_secret, dev_mode=settings.dev_mode)
-    except RuntimeError as exc:
-        checks["jwt_secret"] = {"ok": False, "error": str(exc)}
+    except RuntimeError:
+        # /ready is unauthenticated, so don't describe the auth
+        # misconfiguration to arbitrary callers.
+        checks["jwt_secret"] = {"ok": False, "error": "configuration_invalid"}
 
     try:
         await redis_cache.client.ping()

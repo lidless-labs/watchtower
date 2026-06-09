@@ -1,6 +1,8 @@
 """Configuration loader for Watchtower."""
 
 import copy
+import os
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -507,8 +509,19 @@ def persist_config(updates: dict) -> None:
     validated = AppConfig(**merged)
 
     config_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(config_path, "w", encoding="utf-8") as f:
-        yaml.safe_dump(merged, f, sort_keys=False)
-    config_path.chmod(0o600)
+    # Write to a same-directory temp file and atomically replace so a crash
+    # mid-write can never truncate the only copy of jwt_secret/admin hash,
+    # and secrets are never readable through a looser-permission window.
+    fd, tmp_path = tempfile.mkstemp(dir=config_path.parent, prefix=".config.", suffix=".yaml.tmp")
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            yaml.safe_dump(merged, f, sort_keys=False)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, config_path)
+    except BaseException:
+        os.unlink(tmp_path)
+        raise
 
     _apply_config(validated)

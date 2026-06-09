@@ -52,11 +52,13 @@ class HistoryWriter:
 
         for port in ports:
             speed_bps = float(port.get("speed") or 0)
-            in_bps = float(port.get("in_rate") or 0)
-            out_bps = float(port.get("out_rate") or 0)
+            # in_rate/out_rate are LibreNMS ifInOctets_rate values (bytes/sec);
+            # convert to bits/sec to match the live aggregator and the _bps field names.
+            in_bps = float(port.get("in_rate") or 0) * 8
+            out_bps = float(port.get("out_rate") or 0) * 8
             utilization = 0.0
             if speed_bps > 0:
-                utilization = ((in_bps + out_bps) / speed_bps) * 100
+                utilization = (max(in_bps, out_bps) / speed_bps) * 100
 
             records.append({
                 "time": now,

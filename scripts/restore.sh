@@ -74,6 +74,14 @@ trap cleanup EXIT
 
 tar -C "$tmpdir" -xzf "$ARCHIVE"
 
+# Stop the service before swapping config/state out from under it so a
+# concurrent settings write cannot corrupt the restored files.
+service_was_running=false
+if systemctl is-active --quiet watchtower 2>/dev/null; then
+    service_was_running=true
+    systemctl stop watchtower
+fi
+
 restore_path() {
     local src="$1"
     local dest="$2"
@@ -98,7 +106,9 @@ fi
 chmod 600 "$APP_DIR/config/config.yaml" 2>/dev/null || true
 chmod 600 "$ETC_DIR/bootstrap.env" 2>/dev/null || true
 
-if systemctl list-unit-files watchtower.service >/dev/null 2>&1; then
+if [[ "$service_was_running" == "true" ]]; then
+    systemctl start watchtower
+elif systemctl list-unit-files watchtower.service >/dev/null 2>&1; then
     systemctl restart watchtower
 fi
 
