@@ -2,11 +2,9 @@ import { useCallback, useEffect, useRef } from 'react'
 import { useNocStore } from '../store/nocStore'
 import { useAuthStore } from '../store/authStore'
 
-function getWebSocketUrl(token: string): string {
+function getWebSocketUrl(): string {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  const url = new URL(`${protocol}//${window.location.host}/ws/updates`)
-  url.searchParams.set('token', token)
-  return url.toString()
+  return `${protocol}//${window.location.host}/ws/updates`
 }
 
 // Reconnect backoff: 1s, 2s, 4s, 8s, 16s, 30s (capped).
@@ -64,8 +62,7 @@ export function useWebSocket() {
       return
     }
 
-    const token = useAuthStore.getState().token || localStorage.getItem('watchtower_token')
-    if (!token) {
+    if (!useAuthStore.getState().isAuthenticated) {
       setConnected(false)
       return
     }
@@ -74,10 +71,15 @@ export function useWebSocket() {
       return
     }
 
-    const socket = new WebSocket(getWebSocketUrl(token))
+    const socket = new WebSocket(getWebSocketUrl())
     socketRef.current = socket
 
     socket.onopen = () => {
+      // The HttpOnly session cookie authenticates the handshake. Send one
+      // ping up front: if the cookie was valid this is a normal ping, and if
+      // it was missing/expired the server treats it as a failed auth frame
+      // and closes with 4001 instead of leaving the socket hanging.
+      socket.send(JSON.stringify({ type: 'ping' }))
       reconnectAttemptsRef.current = 0
       setConnected(true)
     }

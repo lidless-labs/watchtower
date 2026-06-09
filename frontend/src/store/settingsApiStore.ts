@@ -1,5 +1,4 @@
 import { create } from 'zustand'
-import { useAuthStore } from './authStore'
 
 export interface SettingsData {
   data_sources?: {
@@ -72,11 +71,6 @@ export interface ConnectionTestResult {
 
 type SettingsTab = 'integrations' | 'polling' | 'alerts' | 'notifications' | 'speedtest' | 'discovery' | 'users' | 'about'
 
-function authHeaders(): Record<string, string> {
-  const token = useAuthStore.getState().token || localStorage.getItem('watchtower_token')
-  return token ? { Authorization: `Bearer ${token}` } : {}
-}
-
 interface SettingsApiState {
   settings: SettingsData | null
   status: StatusResponse | null
@@ -112,7 +106,7 @@ export const useSettingsApiStore = create<SettingsApiState>((set, get) => ({
   fetchSettings: async () => {
     set({ isLoading: true })
     try {
-      const res = await fetch('/api/settings', { headers: authHeaders() })
+      const res = await fetch('/api/settings')
       if (res.ok) {
         const data = await res.json()
         set({ settings: data, isLoading: false })
@@ -127,7 +121,7 @@ export const useSettingsApiStore = create<SettingsApiState>((set, get) => ({
 
   fetchStatus: async () => {
     try {
-      const res = await fetch('/api/settings/status', { headers: authHeaders() })
+      const res = await fetch('/api/settings/status')
       if (res.ok) {
         const data = await res.json()
         set({ status: data })
@@ -142,7 +136,7 @@ export const useSettingsApiStore = create<SettingsApiState>((set, get) => ({
     try {
       const res = await fetch(`/api/settings/${section}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
       })
       if (res.ok) {
@@ -167,7 +161,7 @@ export const useSettingsApiStore = create<SettingsApiState>((set, get) => ({
     try {
       const res = await fetch('/api/settings', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
       })
       if (res.ok) {
@@ -191,7 +185,7 @@ export const useSettingsApiStore = create<SettingsApiState>((set, get) => ({
     try {
       const res = await fetch('/api/settings/test-connection', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(params),
       })
       return await res.json()

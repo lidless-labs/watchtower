@@ -17,14 +17,9 @@ export const apiClient = axios.create({
   },
 })
 
-// Request interceptor for auth
-apiClient.interceptors.request.use((config) => {
-  const token = localStorage.getItem('watchtower_token')
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`
-  }
-  return config
-})
+// Auth rides on the HttpOnly session cookie the backend sets at login; the
+// browser attaches it to these same-origin requests automatically, so no
+// Authorization header is injected here.
 
 // Response interceptor for errors
 apiClient.interceptors.response.use(

@@ -182,7 +182,10 @@ Environment=PATH=$APP_DIR/backend/venv/bin:/usr/bin
 Environment=CONFIG_PATH=$APP_DIR/config/config.yaml
 Environment=TOPOLOGY_PATH=$APP_DIR/config/topology.yaml
 EnvironmentFile=-$BOOTSTRAP_ENV
-ExecStart=$APP_DIR/backend/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+# --proxy-headers trusts X-Forwarded-For/-Proto from the local nginx (default
+# trusted IP is 127.0.0.1) so the app sees real client IPs and the original
+# scheme, which gates the Secure flag on the session cookie under HTTPS.
+ExecStart=$APP_DIR/backend/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --proxy-headers
 Restart=always
 RestartSec=5
 NoNewPrivileges=true

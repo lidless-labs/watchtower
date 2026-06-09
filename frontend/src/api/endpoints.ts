@@ -106,10 +106,8 @@ export interface SpeedtestSummary {
   [key: string]: unknown
 }
 
-function authHeaders(): HeadersInit {
-  const token = localStorage.getItem('watchtower_token')
-  return token ? { Authorization: `Bearer ${token}` } : {}
-}
+// Auth rides on the HttpOnly session cookie, attached automatically to these
+// same-origin requests; no Authorization header is needed.
 
 // Fetch has no built-in timeout - a stuck request would hang forever
 // and leak the in-flight promise. Mirror the axios client default.
@@ -133,10 +131,6 @@ async function fetchJson<T>(url: string, init?: RequestInit, fallback?: T): Prom
     const res = await fetch(url, {
       ...init,
       signal: controller.signal,
-      headers: {
-        ...authHeaders(),
-        ...(init?.headers ?? {}),
-      },
     })
     if (!res.ok) {
       if (fallback !== undefined) {
@@ -182,7 +176,6 @@ export async function fetchAlert(alertId: string): Promise<Alert> {
 export async function acknowledgeAlert(alertId: string): Promise<void> {
   const res = await fetch(`/api/alert/${alertId}/acknowledge`, {
     method: 'POST',
-    headers: authHeaders(),
   })
   if (!res.ok) {
     throw new Error(`Failed to acknowledge alert: ${res.status}`)
@@ -192,7 +185,6 @@ export async function acknowledgeAlert(alertId: string): Promise<void> {
 export async function resolveAlert(alertId: string): Promise<void> {
   const res = await fetch(`/api/alert/${alertId}/resolve`, {
     method: 'POST',
-    headers: authHeaders(),
   })
   if (!res.ok) {
     throw new Error(`Failed to resolve alert: ${res.status}`)

@@ -82,10 +82,8 @@ export default function NotificationsTab() {
     setTesting(channel)
     setTestResult(null)
     try {
-      const token = localStorage.getItem('watchtower_token')
       const res = await fetch(`${API}/api/notifications/test/${channel}`, {
         method: 'POST',
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
       })
       const data = await res.json()
       setTestResult({ channel, ok: data.status === 'success' || data.status === 'demo', msg: data.status === 'success' ? 'Test sent!' : data.error || data.status })

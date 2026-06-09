@@ -341,3 +341,88 @@ async def test_bootstrap_token_works_in_prod(app, monkeypatch):
         f"token-authorized prod bootstrap should succeed, got "
         f"{r.status_code} {r.text}"
     )
+
+
+# ── Session cookie auth ──────────────────────────────────────────────────────
+
+
+async def test_login_sets_httponly_strict_session_cookie(client):
+    r = await client.post(
+        "/api/auth/login",
+        json={"username": "admin", "password": "correct-horse-battery"},
+    )
+    assert r.status_code == 200
+
+    set_cookie = r.headers.get("set-cookie", "").lower()
+    assert "watchtower_session=" in set_cookie
+    assert "httponly" in set_cookie
+    assert "samesite=strict" in set_cookie
+    # Plain-HTTP test transport must not get the Secure flag (it would make
+    # the cookie unusable on HTTP LAN installs).
+    assert "secure" not in set_cookie
+
+
+async def test_session_cookie_authenticates_without_bearer_header(client):
+    r = await client.post(
+        "/api/auth/login",
+        json={"username": "admin", "password": "correct-horse-battery"},
+    )
+    assert r.status_code == 200
+
+    # httpx carries the Set-Cookie jar; no Authorization header on purpose.
+    me = await client.get("/api/auth/me")
+    assert me.status_code == 200
+    assert me.json() == {"username": "admin", "role": "admin"}
+
+
+async def test_bearer_header_takes_precedence_over_cookie(client):
+    r = await client.post(
+        "/api/auth/login",
+        json={"username": "admin", "password": "correct-horse-battery"},
+    )
+    assert r.status_code == 200
+
+    # A bad explicit credential must fail even when a valid cookie rides along,
+    # otherwise a broken API client would silently run with cookie identity.
+    me = await client.get("/api/auth/me", headers={"Authorization": "Bearer garbage"})
+    assert me.status_code == 401
+
+
+async def test_logout_clears_session_cookie(client):
+    r = await client.post(
+        "/api/auth/login",
+        json={"username": "admin", "password": "correct-horse-battery"},
+    )
+    assert r.status_code == 200
+
+    out = await client.post("/api/auth/logout")
+    assert out.status_code == 200
+
+    me = await client.get("/api/auth/me")
+    assert me.status_code == 401
+
+
+async def test_change_password_reissues_session(client, app):
+    from app import auth as auth_module
+    from app import config as config_module
+
+    config_module.config.auth.jwt_secret = TEST_JWT_SECRET
+    config_module.config.auth.token_version = 1
+    token = auth_module.create_token({"username": "admin", "role": "admin"})
+
+    r = await client.post(
+        "/api/auth/change-password",
+        json={"old_password": "correct-horse-battery", "new_password": "ANewLongerPw1"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+
+    # The rotation bumps token_version, killing the caller's old token. The
+    # response must hand back a fresh token (and cookie) so the session survives.
+    assert "watchtower_session=" in r.headers.get("set-cookie", "")
+    new_token = body["token"]
+    assert auth_module.decode_token(new_token) == {"username": "admin", "role": "admin"}
+
+    me_cookie = await client.get("/api/auth/me")
+    assert me_cookie.status_code == 200

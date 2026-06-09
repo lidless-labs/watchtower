@@ -1,24 +1,19 @@
 import { expect, test } from '@playwright/test'
 
-function base64Url(input: string): string {
-  return Buffer.from(input).toString('base64url')
-}
-
-function unsignedJwt(payload: Record<string, unknown>): string {
-  return [
-    base64Url(JSON.stringify({ alg: 'none', typ: 'JWT' })),
-    base64Url(JSON.stringify(payload)),
-    'signature',
-  ].join('.')
-}
-
 test('admin can save polling settings', async ({ page }) => {
   let savedPolling: unknown = null
-  const token = unsignedJwt({ exp: Math.floor(Date.now() / 1000) + 3600 })
 
-  await page.addInitScript((value) => {
-    localStorage.setItem('watchtower_token', value)
-  }, token)
+  // Auth rides on an HttpOnly cookie now; seed the persisted UI auth state
+  // and mock /api/auth/me (below) so checkAuth confirms the session.
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      'watchtower-auth',
+      JSON.stringify({
+        state: { user: { username: 'admin', role: 'admin' }, isAuthenticated: true },
+        version: 0,
+      })
+    )
+  })
 
   await page.route('**/api/auth/me', (route) => route.fulfill({
     status: 200,

@@ -3,7 +3,6 @@ import { useAuthStore } from '../../store/authStore'
 
 export default function UsersTab() {
   const user = useAuthStore((s) => s.user)
-  const token = useAuthStore((s) => s.token)
 
   const [oldPassword, setOldPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
@@ -23,12 +22,11 @@ export default function UsersTab() {
     setSuccess(false)
 
     try {
+      // Session cookie authenticates this; the backend rotates it in the
+      // response so the current session survives the token_version bump.
       const res = await fetch('/api/auth/change-password', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }),
       })
 

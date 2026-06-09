@@ -1,14 +1,22 @@
 """Authentication API routes."""
 
+import hmac
 import ipaddress
 import logging
 import os
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
-from ..auth import UserRole, create_token, get_current_user, hash_password, verify_password
+from ..auth import (
+    SESSION_COOKIE_NAME,
+    UserRole,
+    create_token,
+    get_current_user,
+    hash_password,
+    verify_password,
+)
 from ..config import config, persist_config, settings
 from ..logging_utils import log_event
 from ..ratelimit import sliding_window_check
@@ -69,6 +77,24 @@ def _persist_admin_password_hash(password_hash: str) -> None:
             "token_version": next_token_version,
         }
     })
+
+
+def _set_session_cookie(response: Response, request: Request, token: str) -> None:
+    """Attach the JWT as an HttpOnly cookie so browsers never store it in JS.
+
+    SameSite=Strict plus the empty production CORS allowlist covers CSRF for
+    this same-origin SPA. `secure` mirrors the request scheme so plain-HTTP
+    LAN installs keep working while HTTPS deployments get the flag.
+    """
+    response.set_cookie(
+        SESSION_COOKIE_NAME,
+        token,
+        max_age=config.auth.session_hours * 3600,
+        httponly=True,
+        samesite="strict",
+        secure=request.url.scheme == "https",
+        path="/",
+    )
 
 
 def _client_ip(request: Request) -> str:
@@ -154,7 +180,9 @@ def _authorize_bootstrap(request: Request, client_ip: str) -> None:
         _log_bootstrap_attempt(client_ip, True, "localhost+dev_mode")
         return
 
-    if bootstrap_env_token and provided_token == bootstrap_env_token:
+    if bootstrap_env_token and hmac.compare_digest(
+        provided_token.encode("utf-8"), bootstrap_env_token.encode("utf-8")
+    ):
         _log_bootstrap_attempt(client_ip, True, "valid_bootstrap_token")
         return
 
@@ -164,7 +192,7 @@ def _authorize_bootstrap(request: Request, client_ip: str) -> None:
 
 
 @router.post("/login")
-async def login(payload: LoginRequest, request: Request):
+async def login(payload: LoginRequest, request: Request, response: Response):
     """Authenticate an admin user and return JWT token."""
     client_ip = _client_ip(request)
     await _check_rate_limit(client_ip)
@@ -197,6 +225,7 @@ async def login(payload: LoginRequest, request: Request):
         "role": UserRole.ADMIN.value,
     }
     token = create_token(user)
+    _set_session_cookie(response, request, token)
     log_event(
         logger,
         logging.INFO,
@@ -220,9 +249,18 @@ async def me(current_user: dict = Depends(get_current_user)):
     return current_user
 
 
+@router.post("/logout")
+async def logout(response: Response):
+    """Clear the session cookie. Bearer-token clients just discard their token."""
+    response.delete_cookie(SESSION_COOKIE_NAME, path="/")
+    return {"status": "ok"}
+
+
 @router.post("/change-password")
 async def change_password(
     payload: ChangePasswordRequest,
+    request: Request,
+    response: Response,
     current_user: dict = Depends(get_current_user),
 ):
     """Change admin password."""
@@ -251,4 +289,18 @@ async def change_password(
         token_version=config.auth.token_version,
     )
 
-    return {"status": "ok", "message": "Password updated successfully"}
+    # The token_version bump invalidates every outstanding token, including the
+    # caller's. Issue a fresh one so the admin who changed the password stays
+    # logged in instead of being bounced to the login page mid-session.
+    token = create_token({
+        "username": config.auth.admin_user,
+        "role": UserRole.ADMIN.value,
+    })
+    _set_session_cookie(response, request, token)
+
+    return {
+        "status": "ok",
+        "message": "Password updated successfully",
+        "token": token,
+        "expires_in": config.auth.session_hours * 3600,
+    }

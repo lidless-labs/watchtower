@@ -16,12 +16,7 @@ interface LoginResponse {
   initial_setup?: boolean
 }
 
-interface JwtPayload {
-  exp?: number
-}
-
 interface AuthState {
-  token: string | null
   user: AuthUser | null
   isAuthenticated: boolean
   initialSetupComplete: boolean
@@ -32,34 +27,19 @@ interface AuthState {
   handleAuthError: () => void
 }
 
-function decodeJwtPayload(token: string): JwtPayload | null {
-  try {
-    const [, payload] = token.split('.')
-    if (!payload) {
-      return null
-    }
-
-    const normalized = payload.replace(/-/g, '+').replace(/_/g, '/')
-    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=')
-    return JSON.parse(window.atob(padded)) as JwtPayload
-  } catch {
-    return null
-  }
-}
-
-function isTokenExpired(token: string): boolean {
-  const payload = decodeJwtPayload(token)
-  if (!payload?.exp) {
-    return true
-  }
-
-  return payload.exp * 1000 <= Date.now()
+// The JWT lives in an HttpOnly session cookie set by the backend, so it is
+// never readable from JavaScript (XSS cannot exfiltrate it). This store only
+// tracks who is logged in for UI gating; the server is the source of truth.
+//
+// Drop the token older releases persisted to localStorage. (Guarded so the
+// module also loads in non-browser test environments.)
+if (typeof localStorage !== 'undefined') {
+  localStorage.removeItem('watchtower_token')
 }
 
 export const useAuthStore = create<AuthState>()(
   persist(
-    (set, get) => ({
-      token: null,
+    (set) => ({
       user: null,
       isAuthenticated: false,
       initialSetupComplete: false,
@@ -76,11 +56,9 @@ export const useAuthStore = create<AuthState>()(
           }
         )
 
-        const { token, user, initial_setup } = response.data
-        localStorage.setItem('watchtower_token', token)
+        const { user, initial_setup } = response.data
 
         set({
-          token,
           user,
           isAuthenticated: true,
           initialSetupComplete: Boolean(initial_setup),
@@ -88,9 +66,9 @@ export const useAuthStore = create<AuthState>()(
       },
 
       logout: () => {
-        localStorage.removeItem('watchtower_token')
+        // Best-effort server-side cookie clear; local state clears regardless.
+        apiClient.post('/auth/logout').catch(() => {})
         set({
-          token: null,
           user: null,
           isAuthenticated: false,
           initialSetupComplete: false,
@@ -98,32 +76,21 @@ export const useAuthStore = create<AuthState>()(
       },
 
       checkAuth: async () => {
-        const token = get().token ?? localStorage.getItem('watchtower_token')
-
-        // Quick client-side check first
-        if (!token || isTokenExpired(token)) {
-          localStorage.removeItem('watchtower_token')
-          set({ token: null, user: null, isAuthenticated: false, initialSetupComplete: false })
-          return false
-        }
-
-        // Validate token with server to ensure it's still valid
+        // The session cookie is HttpOnly, so the only way to know whether the
+        // session is still valid is to ask the server.
         try {
           const response = await apiClient.get<AuthUser>('/auth/me')
-          set({ token, user: response.data, isAuthenticated: true })
+          set({ user: response.data, isAuthenticated: true })
           return true
         } catch {
-          // Token is invalid or expired - clear auth state
-          localStorage.removeItem('watchtower_token')
-          set({ token: null, user: null, isAuthenticated: false, initialSetupComplete: false })
+          set({ user: null, isAuthenticated: false, initialSetupComplete: false })
           return false
         }
       },
 
       handleAuthError: () => {
         // Called when a 401 is received - clear auth state
-        localStorage.removeItem('watchtower_token')
-        set({ token: null, user: null, isAuthenticated: false })
+        set({ user: null, isAuthenticated: false })
       },
 
       clearInitialSetupFlag: () => set({ initialSetupComplete: false }),
@@ -131,7 +98,6 @@ export const useAuthStore = create<AuthState>()(
     {
       name: 'watchtower-auth',
       partialize: (state) => ({
-        token: state.token,
         user: state.user,
         isAuthenticated: state.isAuthenticated,
       }),

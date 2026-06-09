@@ -11,7 +11,7 @@ from typing import Any, Awaitable, Callable
 from fastapi import HTTPException, WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
 
-from .auth import UserRole, decode_token
+from .auth import SESSION_COOKIE_NAME, UserRole, decode_token
 from .logging_utils import log_event
 
 logger = logging.getLogger(__name__)
@@ -345,6 +345,10 @@ async def _authenticate_websocket(
     websocket: WebSocket,
 ) -> tuple[dict[str, Any], str] | None:
     token = (websocket.query_params.get("token") or "").strip()
+    if not token:
+        # Browsers authenticate via the HttpOnly session cookie sent on the
+        # handshake; query-param and first-frame tokens remain for API clients.
+        token = (websocket.cookies.get(SESSION_COOKIE_NAME) or "").strip()
 
     if token:
         try:

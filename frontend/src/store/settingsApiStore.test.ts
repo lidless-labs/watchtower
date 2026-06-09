@@ -25,24 +25,22 @@ describe('settingsApiStore', () => {
     installBrowserStorage()
   })
 
-  it('saves a settings section with bearer auth and clears dirty state', async () => {
+  it('saves a settings section and clears dirty state', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ polling: { device_status: 30 } }))
     vi.stubGlobal('fetch', fetchMock)
 
-    const { useAuthStore } = await import('./authStore')
     const { useSettingsApiStore } = await import('./settingsApiStore')
-    useAuthStore.setState({ token: 'token-123', isAuthenticated: true })
     useSettingsApiStore.setState({ dirty: { polling: true } })
 
     await expect(
       useSettingsApiStore.getState().saveSection('polling', { device_status: 30 })
     ).resolves.toBe(true)
 
+    // Auth rides on the HttpOnly session cookie, so no Authorization header.
     expect(fetchMock).toHaveBeenCalledWith('/api/settings/polling', {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: 'Bearer token-123',
       },
       body: JSON.stringify({ device_status: 30 }),
     })

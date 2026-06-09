@@ -17,6 +17,12 @@ class UserRole(str, Enum):
     VIEWER = "viewer"
 
 
+# HttpOnly session cookie set on login. Browsers authenticate with this so the
+# JWT never has to live in JavaScript-accessible storage; API clients keep
+# using the Authorization header, which always takes precedence.
+SESSION_COOKIE_NAME = "watchtower_session"
+
+
 def hash_password(password: str) -> str:
     """Hash a password using bcrypt."""
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
@@ -67,14 +73,17 @@ def decode_token(token: str) -> dict:
 
 
 def get_current_user(request: Request) -> dict:
-    """FastAPI dependency to extract and validate bearer token."""
+    """FastAPI dependency to extract and validate a bearer token or session cookie."""
+    token = ""
     auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
+    if auth_header.startswith("Bearer "):
+        token = auth_header.split(" ", 1)[1].strip()
 
-    token = auth_header.split(" ", 1)[1].strip()
     if not token:
-        raise HTTPException(status_code=401, detail="Missing authentication token")
+        token = (request.cookies.get(SESSION_COOKIE_NAME) or "").strip()
+
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
 
     return decode_token(token)
 
