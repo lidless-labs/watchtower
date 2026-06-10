@@ -4,14 +4,13 @@ NOC dashboard (React 18 + TypeScript + Vite frontend, FastAPI + Python 3.12 back
 
 ## Definition of Done
 
-Before reporting any change complete, ALL of these must pass:
+Before reporting any change complete, this must pass:
 
 ```bash
-cd backend && ruff check app tests && pytest -q
-cd frontend && npm run lint && npm run test -- --run && npm run build
+./scripts/verify
 ```
 
-Backend changes require the backend line; frontend changes require the frontend line; cross-cutting changes require both. Report actual command output, not paraphrase. If anything fails, report the failure verbatim and do not claim success. Tests marked `integration` self-skip when external services are unreachable; a skip is not a failure, but never add a skip to dodge one.
+It runs the backend gates (`ruff check app tests`, `pytest -q`) then the frontend gates (`npm run lint`, `npm run test -- --run`, `npm run build`), in that order. Report actual command output, not paraphrase. If anything fails, report the failure verbatim and do not claim success. Tests marked `integration` self-skip when external services are unreachable; a skip is not a failure, but never add a skip to dodge one.
 
 ## Rules
 
