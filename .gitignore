@@ -77,3 +77,7 @@ Thumbs.db
 *.swp
 *.swo
 *~
+
+# Local brigade memory (cards are local-only, never committed)
+/memory/
+.brigade/
