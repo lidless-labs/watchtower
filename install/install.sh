@@ -4,7 +4,11 @@
 # Run inside an LXC container or VM
 # Usage: bash install.sh
 
-set -e
+# pipefail so a failed curl in a pipe is never masked by a succeeding tail.
+# (`set -u` is intentionally omitted: this installer predates it and has not
+# been audited for unguarded expansions; adding it untested could abort a
+# privileged install mid-run.)
+set -eo pipefail
 
 # Colors
 RED='\033[0;31m'
@@ -79,7 +83,13 @@ if [[ "$OS" == "debian" ]] || [[ "$OS" == "ubuntu" ]]; then
     # Install Node.js 20
     if ! command -v node &> /dev/null; then
         echo -e "${GREEN}Installing Node.js 20...${NC}"
-        curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+        # Download the NodeSource setup script to a file before running it, so a
+        # truncated transfer cannot execute a half-fetched script as root and a
+        # curl failure is not swallowed by the pipe.
+        nodesource_setup="$(mktemp)"
+        curl -fsSL https://deb.nodesource.com/setup_20.x -o "$nodesource_setup"
+        bash "$nodesource_setup"
+        rm -f "$nodesource_setup"
         apt-get install -y nodejs
     fi
 else
