@@ -24,6 +24,12 @@ DISK=32
 REPO_REF="${WATCHTOWER_REPO_REF:-main}"
 INSTALL_URL="https://raw.githubusercontent.com/solomonneas/watchtower/${REPO_REF}/install/install.sh"
 
+# Expected sha256 of install/install.sh. When set, the downloaded installer is
+# verified before it runs and the install aborts on any mismatch (defends
+# against a compromised account, MITM, or CDN cache poisoning serving a tampered
+# script to a root context). Publish this alongside each release tag.
+EXPECTED_SHA256="${WATCHTOWER_INSTALL_SHA256:-}"
+
 echo -e "${CYAN}"
 echo "╔═══════════════════════════════════════════╗"
 echo "║    Watchtower LXC Container Creator       ║"
@@ -241,10 +247,29 @@ echo -e "${GREEN}Ensuring curl is installed...${NC}"
 pct exec "$CTID" -- apt-get install -y curl
 
 # Run installer. Download to a file first (instead of curl | bash) so a
-# truncated transfer can never execute a half-fetched script, and pass the
-# same ref through so the installer checks out exactly what we fetched.
+# truncated transfer can never execute a half-fetched script, verify its
+# checksum when one is pinned, and pass the same ref through so the installer
+# checks out exactly what we fetched.
 echo -e "\n${GREEN}Running Watchtower installer (ref: $REPO_REF)...${NC}"
-if ! pct exec "$CTID" -- bash -c "set -euo pipefail; curl -fsSL '$INSTALL_URL' -o /tmp/watchtower-install.sh && WATCHTOWER_REPO_REF='$REPO_REF' bash /tmp/watchtower-install.sh"; then
+if [ -z "$EXPECTED_SHA256" ]; then
+    echo -e "${YELLOW}WARNING: WATCHTOWER_INSTALL_SHA256 is not set, so the downloaded installer"
+    echo -e "         cannot be integrity-verified. For tamper-evident installs, pin"
+    echo -e "         WATCHTOWER_REPO_REF to a release tag and set WATCHTOWER_INSTALL_SHA256"
+    echo -e "         to the published sha256 of install/install.sh.${NC}"
+fi
+# Build the remote command with the values interpolated by the outer shell, then
+# verify and run entirely inside the container.
+REMOTE_INSTALL_CMD="set -euo pipefail
+curl -fsSL '$INSTALL_URL' -o /tmp/watchtower-install.sh
+expected='$EXPECTED_SHA256'
+actual=\$(sha256sum /tmp/watchtower-install.sh | awk '{print \$1}')
+if [ -n \"\$expected\" ] && [ \"\$expected\" != \"\$actual\" ]; then
+  echo \"Installer checksum mismatch: expected \$expected got \$actual\" >&2
+  rm -f /tmp/watchtower-install.sh
+  exit 1
+fi
+WATCHTOWER_REPO_REF='$REPO_REF' bash /tmp/watchtower-install.sh"
+if ! pct exec "$CTID" -- bash -c "$REMOTE_INSTALL_CMD"; then
     echo -e "${RED}Installer failed! Enter container to debug:${NC}"
     echo "  pct enter $CTID"
     exit 1
