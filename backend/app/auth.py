@@ -38,6 +38,20 @@ def verify_password(password: str, password_hash: str) -> bool:
         return False
 
 
+# Precomputed once so the unknown-username login path can spend the same bcrypt
+# time as a known-username/wrong-password attempt, removing the timing oracle
+# that would otherwise reveal whether a submitted username is the admin user.
+_DUMMY_PASSWORD_HASH = bcrypt.hashpw(b"watchtower-timing-equalizer", bcrypt.gensalt()).decode("utf-8")
+
+
+def dummy_verify_password(password: str) -> None:
+    """Run a throwaway bcrypt verification to equalize login response timing."""
+    try:
+        bcrypt.checkpw(password.encode("utf-8"), _DUMMY_PASSWORD_HASH.encode("utf-8"))
+    except ValueError:
+        pass
+
+
 def create_token(user: dict) -> str:
     """Create a signed JWT for a user."""
     issued_at = datetime.now(timezone.utc)

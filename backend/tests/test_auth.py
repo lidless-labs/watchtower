@@ -144,6 +144,21 @@ async def test_login_wrong_password_401(client):
     assert response.status_code == 401
 
 
+async def test_unknown_username_runs_timing_equalizer(client, monkeypatch):
+    """Unknown-username login must still spend bcrypt time (no timing oracle)."""
+    from app.routers import auth_router
+
+    calls: list[str] = []
+    monkeypatch.setattr(auth_router, "dummy_verify_password", lambda pw: calls.append(pw))
+
+    response = await client.post(
+        "/api/auth/login",
+        json={"username": "not-the-admin", "password": "whatever"},
+    )
+    assert response.status_code == 401
+    assert calls == ["whatever"]
+
+
 async def test_login_rate_limit_kicks_in_after_threshold(client):
     """5 wrong-password attempts in quick succession, then 6th must be 429."""
     for _ in range(5):

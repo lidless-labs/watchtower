@@ -13,6 +13,7 @@ from ..auth import (
     SESSION_COOKIE_NAME,
     UserRole,
     create_token,
+    dummy_verify_password,
     get_current_user,
     hash_password,
     verify_password,
@@ -220,6 +221,9 @@ async def login(payload: LoginRequest, request: Request, response: Response):
     await _check_rate_limit(client_ip)
 
     if payload.username != config.auth.admin_user:
+        # Spend comparable bcrypt time so response latency does not reveal
+        # whether the submitted username matches the admin user.
+        dummy_verify_password(payload.password)
         log_event(logger, logging.WARNING, "auth.login_failed", ip=client_ip, reason="unknown_user", username=payload.username)
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
