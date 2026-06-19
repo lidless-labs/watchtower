@@ -4,6 +4,7 @@ Dispatches alerts to Discord, Pushover, and Email based on config.
 """
 from __future__ import annotations
 
+import html as html_escape
 import logging
 import time
 from collections import deque
@@ -261,14 +262,21 @@ class NotificationService:
         status = "RECOVERED" if is_recovery else severity.upper()
         subject = f"{prefix} {status}: {device}"
 
+        # device/message/details originate from upstream NMS alert data, so they
+        # are escaped before interpolation to prevent HTML injection into the
+        # alert email body.
+        device_html = html_escape.escape(device)
+        message_html = html_escape.escape(message)
+        details_html = html_escape.escape(details)
+
         html = f"""
         <div style="font-family: -apple-system, BlinkMacSystemFont, sans-serif; max-width: 600px; margin: 0 auto;">
             <div style="background: {'#00aa44' if is_recovery else '#cc0000'}; color: white; padding: 16px 20px; border-radius: 8px 8px 0 0;">
-                <h2 style="margin: 0; font-size: 18px;">{'✅' if is_recovery else '🚨'} {status}: {device}</h2>
+                <h2 style="margin: 0; font-size: 18px;">{'✅' if is_recovery else '🚨'} {status}: {device_html}</h2>
             </div>
             <div style="background: #1a1a2e; color: #e0e0e0; padding: 20px; border-radius: 0 0 8px 8px;">
-                <p style="margin: 0 0 12px;">{message}</p>
-                {'<p style="margin: 0; color: #aaa; font-size: 13px;">' + details + '</p>' if details else ''}
+                <p style="margin: 0 0 12px;">{message_html}</p>
+                {'<p style="margin: 0; color: #aaa; font-size: 13px;">' + details_html + '</p>' if details else ''}
                 <hr style="border: 0; border-top: 1px solid #333; margin: 16px 0;" />
                 <p style="margin: 0; color: #666; font-size: 11px;">Watchtower NOC &middot; {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}</p>
             </div>

@@ -47,6 +47,42 @@ async def _patch_send_to_succeed(monkeypatch, service):
     monkeypatch.setattr(service, "_send_email", _ok)
 
 
+async def test_email_html_escapes_alert_content(monkeypatch, fresh_service):
+    """A malicious device/message must not inject raw HTML into the email body."""
+    import aiosmtplib
+
+    captured = {}
+
+    async def _capture(msg, **_kw):
+        # Pull the text/html part out of the MIMEMultipart.
+        for part in msg.walk():
+            if part.get_content_type() == "text/html":
+                captured["html"] = part.get_payload(decode=True).decode("utf-8")
+        return None
+
+    monkeypatch.setattr(aiosmtplib, "send", _capture)
+
+    cfg = {
+        "smtp_host": "smtp.example.invalid",
+        "recipients": ["noc@example.invalid"],
+        "from_address": "watchtower@example.invalid",
+    }
+    await fresh_service._send_email(
+        cfg,
+        severity="critical",
+        device="<script>alert(1)</script>",
+        message="<img src=x onerror=alert(2)>",
+        details="<b>boom</b>",
+        is_recovery=False,
+    )
+
+    body = captured["html"]
+    assert "<script>alert(1)</script>" not in body
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in body
+    assert "<img src=x onerror=alert(2)>" not in body
+    assert "&lt;img src=x onerror=alert(2)&gt;" in body
+
+
 async def test_duplicate_alert_within_cooldown_is_suppressed(
     wired_redis_cache, discord_config, fresh_service, monkeypatch
 ):
