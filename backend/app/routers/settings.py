@@ -233,19 +233,38 @@ async def _run_connection_test(data: dict[str, Any]) -> dict[str, Any]:
     except HTTPException:
         raise
     except httpx.HTTPStatusError as exc:
+        # Return the upstream status code and the exception class only. The full
+        # str(exc) carries the target URL and internal host/port detail that
+        # should not reach the client; log it server-side instead.
+        log_event(
+            logger,
+            logging.WARNING,
+            "settings.connection_test_failed",
+            integration_type=integration_type,
+            error=exc.__class__.__name__,
+            detail=str(exc),
+        )
         return {
             "status": "error",
             "message": "Connection test failed",
             "details": {
                 "http_status": exc.response.status_code,
-                "error": str(exc),
+                "error": exc.__class__.__name__,
             },
         }
     except Exception as exc:  # noqa: BLE001
+        log_event(
+            logger,
+            logging.WARNING,
+            "settings.connection_test_failed",
+            integration_type=integration_type,
+            error=exc.__class__.__name__,
+            detail=str(exc),
+        )
         return {
             "status": "error",
             "message": "Connection test failed",
-            "details": {"error": str(exc)},
+            "details": {"error": exc.__class__.__name__},
         }
 
 
@@ -334,7 +353,14 @@ async def get_settings_status(_current_user: dict = Depends(get_current_user)):
         await redis_cache.client.ping()
         status["redis"]["connected"] = True
     except Exception as exc:  # noqa: BLE001
-        status["redis"]["error"] = str(exc)
+        log_event(
+            logger,
+            logging.WARNING,
+            "settings.redis_status_failed",
+            error=exc.__class__.__name__,
+            detail=str(exc),
+        )
+        status["redis"]["error"] = exc.__class__.__name__
 
     checks: list[tuple[str, dict[str, Any]]] = []
     if status["librenms"]["configured"]:

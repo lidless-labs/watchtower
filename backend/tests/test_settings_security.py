@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 from fastapi import HTTPException
 
+from app.routers import settings as settings_module
 from app.routers.settings import (
     _run_connection_test,
     _validate_settings_section,
@@ -34,6 +35,24 @@ async def test_connection_test_rejects_metadata_ip():
         await _run_connection_test({"type": "influxdb", "url": "http://169.254.169.254"})
 
     assert exc.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_connection_test_error_does_not_leak_exception_string(monkeypatch):
+    secret_detail = "https://internal-host.lan:8086 ConnectError"
+
+    async def _boom(_data):
+        raise RuntimeError(secret_detail)
+
+    # _run_connection_test builds its testers dict from the module-level
+    # functions at call time, so patching the module attribute is enough.
+    monkeypatch.setattr(settings_module, "_test_influxdb", _boom)
+
+    result = await _run_connection_test({"type": "influxdb", "url": "http://example.com"})
+
+    assert result["status"] == "error"
+    assert result["details"]["error"] == "RuntimeError"
+    assert secret_detail not in str(result)
 
 
 def test_settings_update_rejects_unknown_top_level_key():
