@@ -10,6 +10,7 @@ from app.routers.settings import (
     _run_connection_test,
     _validate_settings_section,
     _validate_settings_update,
+    _validated_base_url,
 )
 
 
@@ -35,6 +36,33 @@ async def test_connection_test_rejects_metadata_ip():
         await _run_connection_test({"type": "influxdb", "url": "http://169.254.169.254"})
 
     assert exc.value.status_code == 400
+
+
+def test_validated_url_rejects_hostname_resolving_to_metadata(monkeypatch):
+    # A hostname that resolves to the cloud-metadata IP must be blocked even
+    # though the host string itself is not a literal metadata address.
+    monkeypatch.setattr(settings_module, "_resolve_host_addresses", lambda host: {"169.254.169.254"})
+
+    with pytest.raises(HTTPException) as exc:
+        _validated_base_url("http://innocent-name.example.com")
+
+    assert exc.value.status_code == 400
+
+
+def test_validated_url_allows_private_ip_literal():
+    # The app monitors private-network infrastructure, so RFC1918 literals are
+    # legitimate targets and must NOT be blocked.
+    assert _validated_base_url("http://192.168.1.50:8086") == "http://192.168.1.50:8086"
+
+
+def test_validated_url_allows_loopback_literal():
+    # Single-host installs point InfluxDB at localhost; loopback must be allowed.
+    assert _validated_base_url("http://127.0.0.1:8086") == "http://127.0.0.1:8086"
+
+
+def test_validated_url_allows_public_hostname(monkeypatch):
+    monkeypatch.setattr(settings_module, "_resolve_host_addresses", lambda host: {"93.184.216.34"})
+    assert _validated_base_url("https://example.com") == "https://example.com"
 
 
 @pytest.mark.asyncio

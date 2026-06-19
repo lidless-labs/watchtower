@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+import socket
 from typing import Any, get_args, get_origin
 
 import httpx
@@ -123,15 +124,43 @@ def _validated_base_url(raw_url: Any) -> str:
     except ValueError:
         address = None
 
-    if address and (
-        address.is_link_local
+    if address is not None:
+        # Literal IP: check it directly.
+        if _is_denied_address(address):
+            raise HTTPException(status_code=400, detail="url host is not allowed")
+    else:
+        # Hostname: resolve and apply the same deny rules to every resolved
+        # address, so a name pointing at the cloud-metadata or a link-local IP
+        # cannot slip past the literal-only check above.
+        for resolved in _resolve_host_addresses(host):
+            if resolved in _METADATA_HOSTS or _is_denied_address(ipaddress.ip_address(resolved)):
+                raise HTTPException(status_code=400, detail="url host resolves to a blocked address")
+
+    return url_text
+
+
+def _is_denied_address(address: ipaddress._BaseAddress) -> bool:
+    """Deny cloud-metadata / link-local and other non-routable ranges.
+
+    Private and loopback ranges are intentionally allowed: Watchtower monitors
+    LibreNMS/Proxmox/InfluxDB on the local network (and localhost on single-host
+    installs), so blocking them would break the integration tests this guards.
+    """
+    return (
+        address.is_link_local  # includes 169.254.169.254 metadata
         or address.is_multicast
         or address.is_reserved
         or address.is_unspecified
-    ):
-        raise HTTPException(status_code=400, detail="url host is not allowed")
+    )
 
-    return url_text
+
+def _resolve_host_addresses(host: str) -> set[str]:
+    """Resolve a hostname to its IP addresses; empty set if it cannot resolve."""
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except (socket.gaierror, UnicodeError, OSError):
+        return set()
+    return {info[4][0] for info in infos}
 
 
 async def _test_librenms(payload: dict[str, Any]) -> dict[str, Any]:
