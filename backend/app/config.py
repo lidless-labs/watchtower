@@ -27,6 +27,10 @@ class AuthConfig(BaseModel):
     jwt_secret: str = "change-me-in-production"
     session_hours: int = 24
     token_version: int = Field(default=1, ge=1)
+    # One-way latch set on first-login setup. Once true, the bootstrap branch is
+    # refused regardless of admin_password_hash, so a blanked hash (bad merge,
+    # pre-setup restore) cannot silently re-open admin account creation.
+    bootstrap_completed: bool = False
 
 
 def is_placeholder_jwt_secret(secret: str) -> bool:

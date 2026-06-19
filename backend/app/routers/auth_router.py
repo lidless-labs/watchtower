@@ -75,6 +75,9 @@ def _persist_admin_password_hash(password_hash: str) -> None:
             "jwt_secret": config.auth.jwt_secret,
             "session_hours": config.auth.session_hours,
             "token_version": next_token_version,
+            # Latch bootstrap closed: any future login with a missing hash is
+            # treated as tampering, not a fresh install.
+            "bootstrap_completed": True,
         }
     })
 
@@ -204,6 +207,18 @@ async def login(payload: LoginRequest, request: Request, response: Response):
     initial_setup = False
 
     if not config.auth.admin_password_hash:
+        if config.auth.bootstrap_completed:
+            # Setup already happened once; a missing hash now means tampering or
+            # a bad restore, never a fresh install. Refuse to re-bootstrap.
+            log_event(
+                logger,
+                logging.ERROR,
+                "auth.bootstrap_refused",
+                ip=client_ip,
+                reason="already_completed_hash_missing",
+            )
+            raise HTTPException(status_code=403, detail="First-login bootstrap is restricted")
+
         await _check_bootstrap_rate_limit(client_ip)
         _authorize_bootstrap(request, client_ip)
 

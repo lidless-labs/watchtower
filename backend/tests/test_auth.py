@@ -50,6 +50,9 @@ def app(wired_redis_cache, monkeypatch, tmp_path):
     config_module.config.auth.jwt_secret = TEST_JWT_SECRET
     config_module.config.auth.token_version = 1
     config_module.config.auth.session_hours = 1
+    # Reset the bootstrap latch on the shared config singleton so it does not
+    # leak True across tests after a prior _persist_admin_password_hash.
+    config_module.config.auth.bootstrap_completed = False
 
     application = FastAPI()
     application.include_router(auth_router.router, prefix="/api")
@@ -202,8 +205,11 @@ async def test_bootstrap_rate_limit_kicks_in(app, monkeypatch):
     async with _make_client(app) as bc:
         # Each within-quota bootstrap call sets the password (200), so we
         # blank it immediately to keep the next call on the bootstrap path.
+        # The bootstrap latch is also reset so this test exercises the rate
+        # limiter (its actual subject), not the one-way latch.
         for attempt in range(3):
             config_module.config.auth.admin_password_hash = ""
+            config_module.config.auth.bootstrap_completed = False
             r = await bc.post(
                 "/api/auth/login",
                 json={"username": "admin", "password": "newAdminPw1"},
@@ -215,6 +221,7 @@ async def test_bootstrap_rate_limit_kicks_in(app, monkeypatch):
 
         # 4th attempt within 60s: bootstrap rate limit must fire.
         config_module.config.auth.admin_password_hash = ""
+        config_module.config.auth.bootstrap_completed = False
         over = await bc.post(
             "/api/auth/login",
             json={"username": "admin", "password": "newAdminPw1"},
@@ -341,6 +348,52 @@ async def test_bootstrap_token_works_in_prod(app, monkeypatch):
         f"token-authorized prod bootstrap should succeed, got "
         f"{r.status_code} {r.text}"
     )
+
+
+async def test_bootstrap_latch_blocks_reopen_after_blanked_hash(app, monkeypatch):
+    """Once setup has completed, a blanked admin hash must NOT reopen bootstrap.
+
+    Simulates a bad restore/merge that clears admin_password_hash while
+    bootstrap_completed stays True. Even in dev_mode on localhost (the most
+    permissive authz path), first-login must be refused as tampering.
+    """
+    from app import config as config_module
+
+    monkeypatch.setattr(config_module.settings, "dev_mode", True)
+    monkeypatch.delenv("WATCHTOWER_BOOTSTRAP_TOKEN", raising=False)
+    config_module.config.auth.admin_password_hash = ""
+    config_module.config.auth.bootstrap_completed = True
+
+    async with _make_client(app) as bc:
+        r = await bc.post(
+            "/api/auth/login",
+            json={"username": "admin", "password": "attackerPw1"},
+        )
+    assert r.status_code == 403, (
+        f"bootstrap must stay closed after completion, got {r.status_code} {r.text}"
+    )
+    # And the attacker password must not have been set.
+    assert config_module.config.auth.admin_password_hash == ""
+
+
+async def test_initial_setup_persists_bootstrap_latch(app, monkeypatch):
+    """First-login setup must persist bootstrap_completed=True to disk."""
+    from app import config as config_module
+
+    monkeypatch.setattr(config_module.settings, "dev_mode", True)
+    monkeypatch.delenv("WATCHTOWER_BOOTSTRAP_TOKEN", raising=False)
+    config_module.config.auth.admin_password_hash = ""
+    config_module.config.auth.bootstrap_completed = False
+
+    async with _make_client(app) as bc:
+        r = await bc.post(
+            "/api/auth/login",
+            json={"username": "admin", "password": "newAdminPw1"},
+        )
+    assert r.status_code == 200
+    assert config_module.config.auth.bootstrap_completed is True
+    on_disk = yaml.safe_load(Path(config_module.settings.config_path).read_text())
+    assert on_disk["auth"]["bootstrap_completed"] is True
 
 
 # ── Session cookie auth ──────────────────────────────────────────────────────
