@@ -28,11 +28,14 @@ services:
     environment:
       DOCKER_INFLUXDB_INIT_MODE: setup
       DOCKER_INFLUXDB_INIT_USERNAME: ${WATCHTOWER_INFLUXDB_USERNAME:-admin}
-      DOCKER_INFLUXDB_INIT_PASSWORD: ${WATCHTOWER_INFLUXDB_PASSWORD:-watchtower-admin}
+      # No working defaults for the password/token: compose refuses to start
+      # if they are unset or empty, so a deployment can never inherit a
+      # predictable admin credential. Generate with `openssl rand -hex 32`.
+      DOCKER_INFLUXDB_INIT_PASSWORD: ${WATCHTOWER_INFLUXDB_PASSWORD:?set WATCHTOWER_INFLUXDB_PASSWORD in .env (openssl rand -hex 32)}
       DOCKER_INFLUXDB_INIT_ORG: watchtower
       DOCKER_INFLUXDB_INIT_BUCKET: watchtower
       DOCKER_INFLUXDB_INIT_RETENTION: 30d
-      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${WATCHTOWER_INFLUXDB_ADMIN_TOKEN:-watchtower-dev-token}
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${WATCHTOWER_INFLUXDB_ADMIN_TOKEN:?set WATCHTOWER_INFLUXDB_ADMIN_TOKEN in .env (openssl rand -hex 32)}
 
 volumes:
   redis-data:

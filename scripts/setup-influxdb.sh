@@ -17,7 +17,7 @@ cd "$PROJECT_DIR"
 INFLUX_URL="${INFLUXDB_URL:-http://localhost:8086}"
 INFLUX_ORG="${INFLUXDB_ORG:-watchtower}"
 INFLUX_BUCKET="${INFLUXDB_BUCKET:-watchtower}"
-INFLUX_TOKEN="${INFLUXDB_TOKEN:-watchtower-dev-token}"
+INFLUX_TOKEN="${INFLUXDB_TOKEN:-}"  # required; no default, see check after arg parse
 
 # Colors
 GREEN='\033[0;32m'
@@ -40,6 +40,12 @@ for arg in "$@"; do
     esac
     shift 2>/dev/null || true
 done
+
+if [ -z "$INFLUX_TOKEN" ]; then
+    echo "ERROR: InfluxDB admin token is required." >&2
+    echo "Set INFLUXDB_TOKEN (matching WATCHTOWER_INFLUXDB_ADMIN_TOKEN in .env) or pass --token." >&2
+    exit 1
+fi
 
 echo -e "${CYAN}"
 echo "╔══════════════════════════════════════╗"
@@ -128,5 +134,5 @@ echo "  org: \"$INFLUX_ORG\""
 echo "  bucket: \"$INFLUX_BUCKET\""
 echo -e "  enabled: true${NC}"
 echo ""
-echo "InfluxDB UI: $INFLUX_URL (admin / watchtower-admin)"
+echo "InfluxDB UI: $INFLUX_URL (sign in with the credentials from your .env)"
 echo ""
