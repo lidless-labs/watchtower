@@ -190,6 +190,36 @@ async def test_login_rate_limit_uses_forwarded_ip_from_loopback_proxy(client):
     assert different_client.status_code == 200
 
 
+async def test_account_rate_limit_caps_distributed_attack(client):
+    """A distributed attacker rotating IPs must still hit the per-account cap.
+
+    Each attempt uses a distinct forwarded IP, so the per-IP limit (5/window)
+    never fires. The aggregate per-account ceiling (30/600s) must engage once
+    total attempts on the username exceed the cap, regardless of source IP.
+    """
+    from app.routers.auth_router import _ACCOUNT_RATE_LIMIT_MAX
+
+    for i in range(_ACCOUNT_RATE_LIMIT_MAX):
+        r = await client.post(
+            "/api/auth/login",
+            json={"username": "admin", "password": "wrong"},
+            headers={"X-Real-IP": f"203.0.113.{i + 1}"},
+        )
+        assert r.status_code == 401, (
+            f"attempt {i + 1} from a fresh IP should pass per-IP limit, got {r.status_code}"
+        )
+
+    # One more from yet another fresh IP: per-IP would allow it, account cap blocks.
+    over = await client.post(
+        "/api/auth/login",
+        json={"username": "admin", "password": "wrong"},
+        headers={"X-Real-IP": "203.0.113.200"},
+    )
+    assert over.status_code == 429, (
+        f"account-level cap must block the distributed attack, got {over.status_code}"
+    )
+
+
 async def test_bootstrap_rate_limit_kicks_in(app, monkeypatch):
     """4 bootstrap attempts in <60s must hit the 3/60s bootstrap rate limit on the 4th.
 

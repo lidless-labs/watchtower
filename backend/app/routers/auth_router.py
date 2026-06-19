@@ -29,6 +29,14 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 _RATE_LIMIT_MAX = 5
 _RATE_LIMIT_WINDOW = 300
 
+# Aggregate per-account ceiling across ALL source IPs. The per-IP limit alone
+# lets a distributed attacker (N IPs) make 5*N attempts per window; this caps
+# total attempts on a username regardless of how many IPs they rotate through.
+# Kept high and on a self-healing sliding window (not a hard lockout) so the
+# single admin account cannot be locked out indefinitely by a flood.
+_ACCOUNT_RATE_LIMIT_MAX = 30
+_ACCOUNT_RATE_LIMIT_WINDOW = 600
+
 _BOOTSTRAP_RATE_LIMIT_MAX = 3
 _BOOTSTRAP_RATE_LIMIT_WINDOW = 60
 
@@ -39,6 +47,17 @@ async def _check_rate_limit(ip: str) -> None:
         f"watchtower:ratelimit:login:{ip}",
         _RATE_LIMIT_MAX,
         _RATE_LIMIT_WINDOW,
+    )
+    if not allowed:
+        raise HTTPException(status_code=429, detail="Too many login attempts. Try again later.")
+
+
+async def _check_account_rate_limit(username: str) -> None:
+    """Raise 429 if a username exceeds the aggregate cross-IP attempt ceiling."""
+    allowed, _ = await sliding_window_check(
+        f"watchtower:ratelimit:login:account:{username}",
+        _ACCOUNT_RATE_LIMIT_MAX,
+        _ACCOUNT_RATE_LIMIT_WINDOW,
     )
     if not allowed:
         raise HTTPException(status_code=429, detail="Too many login attempts. Try again later.")
@@ -203,6 +222,10 @@ async def login(payload: LoginRequest, request: Request, response: Response):
     if payload.username != config.auth.admin_user:
         log_event(logger, logging.WARNING, "auth.login_failed", ip=client_ip, reason="unknown_user", username=payload.username)
         raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    # Aggregate cross-IP ceiling, checked after confirming the username so an
+    # attacker cannot exhaust the real admin's bucket with arbitrary usernames.
+    await _check_account_rate_limit(payload.username)
 
     initial_setup = False
 
