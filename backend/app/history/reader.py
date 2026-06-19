@@ -40,6 +40,20 @@ def _validate_duration(value: str, name: str) -> str:
     return value
 
 
+def _safe_bucket() -> str:
+    """Return the configured InfluxDB bucket, validated for Flux interpolation.
+
+    The bucket name comes from admin-controlled config, not the request, but it
+    is interpolated into every Flux query string. A bucket containing a double
+    quote would break out of the string literal and inject arbitrary Flux, so
+    it is held to the same character allowlist as request identifiers.
+    """
+    bucket = settings.influxdb_bucket
+    if not bucket or not _SAFE_IDENTIFIER.match(bucket):
+        raise HTTPException(status_code=500, detail="InfluxDB bucket is misconfigured")
+    return bucket
+
+
 class HistoryReader:
     """Queries InfluxDB historical measurements."""
 
@@ -61,7 +75,7 @@ class HistoryReader:
         aggregate_window = _validate_duration(aggregate_window, "aggregate_window")
 
         flux = f'''
-from(bucket: "{settings.influxdb_bucket}")
+from(bucket: "{_safe_bucket()}")
   |> range(start: {start}, stop: {stop})
   |> filter(fn: (r) => r["_measurement"] == "device_metrics")
   |> filter(fn: (r) => r["device_id"] == "{device_id}")
@@ -84,7 +98,7 @@ from(bucket: "{settings.influxdb_bucket}")
         aggregate_window = _validate_duration(aggregate_window, "aggregate_window")
 
         flux = f'''
-from(bucket: "{settings.influxdb_bucket}")
+from(bucket: "{_safe_bucket()}")
   |> range(start: {start}, stop: {stop})
   |> filter(fn: (r) => r["_measurement"] == "interface_metrics")
   |> filter(fn: (r) => r["device_id"] == "{device_id}")
@@ -116,7 +130,7 @@ from(bucket: "{settings.influxdb_bucket}")
         aggregate_window = _validate_duration(aggregate_window, "aggregate_window")
 
         flux = f'''
-from(bucket: "{settings.influxdb_bucket}")
+from(bucket: "{_safe_bucket()}")
   |> range(start: {start}, stop: {stop})
   |> filter(fn: (r) => r["_measurement"] == "interface_metrics")
   |> filter(fn: (r) => r["device_id"] == "{device_id}")
@@ -146,7 +160,7 @@ from(bucket: "{settings.influxdb_bucket}")
         aggregate_window = _validate_duration(aggregate_window, "aggregate_window")
 
         flux = f'''
-from(bucket: "{settings.influxdb_bucket}")
+from(bucket: "{_safe_bucket()}")
   |> range(start: {start}, stop: {stop})
   |> filter(fn: (r) => r["_measurement"] == "network_summary")
   |> aggregateWindow(every: {aggregate_window}, fn: mean, createEmpty: false)
@@ -171,7 +185,7 @@ from(bucket: "{settings.influxdb_bucket}")
 
         device_filter = f'  |> filter(fn: (r) => r["device_id"] == "{device_id}")\n' if device_id else ""
         flux = f'''
-from(bucket: "{settings.influxdb_bucket}")
+from(bucket: "{_safe_bucket()}")
   |> range(start: {start}, stop: {stop})
   |> filter(fn: (r) => r["_measurement"] == "alert_events")
 {device_filter}  |> filter(fn: (r) => r["_field"] == "alert_id" or r["_field"] == "state" or r["_field"] == "title")
@@ -197,7 +211,7 @@ from(bucket: "{settings.influxdb_bucket}")
         aggregate_window = _validate_duration(aggregate_window, "aggregate_window")
 
         flux = f'''
-from(bucket: "{settings.influxdb_bucket}")
+from(bucket: "{_safe_bucket()}")
   |> range(start: {start}, stop: {stop})
   |> filter(fn: (r) => r["_measurement"] == "speedtest_results")
   |> aggregateWindow(every: {aggregate_window}, fn: mean, createEmpty: false)
@@ -218,7 +232,7 @@ from(bucket: "{settings.influxdb_bucket}")
         start = _validate_time_expr(start, "start")
 
         flux = f'''
-from(bucket: "{settings.influxdb_bucket}")
+from(bucket: "{_safe_bucket()}")
   |> range(start: {start}, stop: now())
   |> filter(fn: (r) => r["_measurement"] == "interface_metrics")
   |> filter(fn: (r) => r["_field"] == "in_bps" or r["_field"] == "out_bps")
