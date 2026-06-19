@@ -66,9 +66,11 @@ async def get_system_diagnostics():
     if not config_path.is_absolute():
         config_path = Path(__file__).parent.parent.parent / settings.config_path
 
+    # Report readability and mode but not the absolute path: the full server
+    # path is host-fingerprinting that aids later path-based attacks and is not
+    # actionable to an admin who already controls the config.
     config_file_check = {
         "ok": config_path.exists(),
-        "path": str(config_path),
         "mode": oct(config_path.stat().st_mode & 0o777) if config_path.exists() else None,
     }
     checks = {
@@ -83,7 +85,8 @@ async def get_system_diagnostics():
         "service": "watchtower",
         "runtime": {
             "python": sys.version.split()[0],
-            "platform": platform.platform(),
+            # Coarse OS name only (e.g. "Linux"), not the full kernel/build string.
+            "platform": platform.system(),
             "uptime_seconds": round(time.time() - PROCESS_STARTED_AT, 3),
             "dev_mode": settings.dev_mode,
         },

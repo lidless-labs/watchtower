@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import platform
+
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
@@ -38,6 +40,11 @@ async def test_system_diagnostics_reports_redacted_runtime_state(wired_redis_cac
     assert body["checks"]["redis"]["ok"] is True
     assert body["checks"]["config_file"]["mode"] == "0o600"
     assert "jwt_secret" not in str(body)
+    # Host fingerprinting must be coarse: no absolute config path, no full
+    # kernel/build platform string.
+    assert "path" not in body["checks"]["config_file"]
+    assert str(config_path) not in str(body)
+    assert body["runtime"]["platform"] == platform.system()
 
 
 async def test_system_diagnostics_requires_admin():
