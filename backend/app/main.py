@@ -106,11 +106,18 @@ async def lifespan(app: FastAPI):
     await redis_cache.disconnect()
 
 
+# Interactive docs and the OpenAPI schema map every route (including admin
+# diagnostics and settings mutations) for any unauthenticated caller. FastAPI
+# mounts them outside the router auth dependencies, so they must be gated
+# explicitly. Expose them only in dev_mode.
 app = FastAPI(
     title="Watchtower",
     description="Network Operations Center Dashboard API",
     version="1.0.0",
     lifespan=lifespan,
+    docs_url="/docs" if settings.dev_mode else None,
+    redoc_url="/redoc" if settings.dev_mode else None,
+    openapi_url="/openapi.json" if settings.dev_mode else None,
 )
 
 # CORS configuration
