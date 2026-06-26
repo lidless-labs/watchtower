@@ -1,0 +1,49 @@
+name: Feature request
+description: Suggest a new capability, integration, or improvement for Watchtower.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the operator pain point, not just the feature. What are you trying to see or do that Watchtower does not support yet?
+      placeholder: |
+        When a WAN link flaps, I want to see the flap history on the device page
+        instead of just the current state.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What would the feature look like? A new view, a new integration, a config option?
+    validations:
+      required: false
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Frontend / dashboard UI
+        - Backend API
+        - New integration / data source
+        - Notifications
+        - Historical data / metrics
+        - Install / deployment
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: How do you handle this today (another tool, a workaround)?
+    validations:
+      required: false
+  - type: checkboxes
+    id: scrub
+    attributes:
+      label: Pre-flight
+      options:
+        - label: I have removed real hostnames, device IPs, tokens, and personal paths from this request.
+          required: true

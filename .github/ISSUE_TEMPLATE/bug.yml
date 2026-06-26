@@ -1,0 +1,76 @@
+name: Bug report
+description: Something is broken in Watchtower, such as the dashboard UI, the API, polling, an integration, or notifications.
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you do, and what did you expect versus what you got?
+      placeholder: |
+        I opened the topology view and the link status for one device stayed grey.
+        I expected it to show up/down.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of Watchtower?
+      options:
+        - Frontend / dashboard UI
+        - Backend API
+        - Polling / scheduler
+        - LibreNMS integration
+        - Proxmox integration
+        - Notifications (Discord / Pushover / email)
+        - WebSocket live updates
+        - InfluxDB / historical data
+        - Install / config
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: commit
+    attributes:
+      label: Watchtower commit
+      description: Output of `git rev-parse --short HEAD`.
+      placeholder: a1b2c3d
+    validations:
+      required: true
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      placeholder: 3.12.3
+    validations:
+      required: false
+  - type: input
+    id: node
+    attributes:
+      label: Node version
+      placeholder: 20.11.0
+    validations:
+      required: false
+  - type: input
+    id: os
+    attributes:
+      label: OS / deployment
+      placeholder: Ubuntu 24.04 (systemd), Docker, etc.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / output
+      description: Paste relevant backend logs or browser console output. Keep enough to reproduce.
+      render: shell
+    validations:
+      required: false
+  - type: checkboxes
+    id: scrub
+    attributes:
+      label: Pre-flight
+      options:
+        - label: I have removed real hostnames, device IPs, tokens, and personal paths from this report.
+          required: true
