@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Project website
+    url: https://lidless.dev/watchtower
+    about: What Watchtower is, what it watches, and how to run it.
+  - name: Security report
+    url: https://github.com/solomonneas/watchtower/security/policy
+    about: Do not file security issues publicly. See SECURITY.md.
