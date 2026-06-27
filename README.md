@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/watchtower-banner.jpg" alt="Watchtower banner" width="900">
+  <img src="docs/assets/watchtower-banner.jpg" alt="watchtower banner" width="900">
 </p>
 
 <h1 align="center">Watchtower</h1>
@@ -9,15 +9,14 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/github/actions/workflow/status/solomonneas/watchtower/ci.yml?branch=main&style=for-the-badge&label=ci" alt="CI status">
-  <img src="https://img.shields.io/badge/status-WIP-orange?style=for-the-badge" alt="Status: work in progress">
-  <img src="https://img.shields.io/badge/python-3.12-blue?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.12">
-  <img src="https://img.shields.io/badge/node-20%2B-339933?style=for-the-badge&logo=node.js&logoColor=white" alt="Node 20+">
-  <img src="https://img.shields.io/badge/license-MIT-green?style=for-the-badge" alt="MIT license">
+  <strong>Website:</strong> <a href="https://lidless.dev/watchtower">lidless.dev/watchtower</a>
 </p>
 
 <p align="center">
-  <strong>Website:</strong> <a href="https://lidless.dev/watchtower">lidless.dev/watchtower</a>
+  <img src="https://img.shields.io/github/actions/workflow/status/lidless-labs/watchtower/ci.yml?branch=main&style=for-the-badge&label=ci" alt="CI status">
+  <img src="https://img.shields.io/badge/python-3.12-blue?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.12">
+  <img src="https://img.shields.io/badge/node-20%2B-339933?style=for-the-badge&logo=node.js&logoColor=white" alt="Node 20+">
+  <img src="https://img.shields.io/badge/license-MIT-green?style=for-the-badge" alt="MIT license">
 </p>
 
 Watchtower is a self-hosted Network Operations Center (NOC) dashboard that watches network devices, interfaces, VMs, and alerts through LibreNMS and Proxmox, with WebSocket-driven live updates. It exists because the raw LibreNMS UI is a deep tool built for engineers running it all day, and a general dashboard like Grafana means hand-building every panel and query before you see a single device; Watchtower is the opinionated middle: one console that already knows what a homelab operator wants to see. It is a work in progress, run from source, and is not published to any package registry.
@@ -33,48 +32,6 @@ Watchtower is a self-hosted Network Operations Center (NOC) dashboard that watch
 ## What it does
 
 Watchtower is a NOC dashboard for **network monitoring** in a homelab or small network. It polls **LibreNMS** and **Proxmox** on a schedule, caches current state in Redis, stores history in InfluxDB, and pushes changes to the browser over **WebSockets** so device status, interface graphs, and alerts stay current without a page refresh. The frontend is **React 18 + TypeScript**; the backend is a **FastAPI** service on **Python 3.12** with **APScheduler** driving the polling loop. Instead of jumping between the LibreNMS web UI, the Proxmox console, and a Grafana tab, you get one screen for device health, topology, interface utilization, and the alert feed.
-
----
-
-## What it watches
-
-| Capability | What you get |
-|---|---|
-| **Device status** | Real-time up / down / degraded state, pushed over WebSockets. |
-| **Network topology** | Interactive React Flow map with link status and port detail. |
-| **Interface utilization** | Bandwidth, errors, and traffic graphs per interface. |
-| **Port groups** | Aggregate traffic for groups of ports matched by description. |
-| **Speedtest** | Scheduled WAN speed tests with historical tracking. |
-| **Alert feed** | Critical / warning / info severities with an acknowledgment workflow. |
-| **Notifications** | Discord, Pushover, and email channels with configurable thresholds. |
-| **Proxmox integration** | VM / LXC status, resource usage, and node details. |
-| **Historical data** | InfluxDB time-series with configurable retention. |
-| **CDP / LLDP discovery** | Automatic topology discovery from LibreNMS. |
-
-Administration covers a web-based settings UI for integrations and thresholds, JWT authentication with role-based permissions, and admin user management.
-
----
-
-## Tech stack
-
-| Layer | Technology |
-|-------|------------|
-| Frontend | React 18, TypeScript, Tailwind CSS |
-| State | Zustand |
-| Visualization | React Flow, Recharts |
-| Backend | FastAPI, Python 3.12 |
-| Live updates | WebSockets (`/ws/updates`) |
-| Cache | Redis |
-| Time series | InfluxDB |
-| Scheduler | APScheduler |
-| Auth | JWT + bcrypt |
-
-| Integration | Purpose |
-|---|---|
-| **LibreNMS** | Device polling, SNMP data, alerts, CDP/LLDP topology |
-| **Proxmox** | VM/LXC monitoring, node health, storage |
-| **InfluxDB** | Historical metrics and graphs |
-| **Netdisco** | Network inventory (optional) |
 
 ---
 
@@ -161,6 +118,48 @@ Run the local verification gate before committing changes:
 ```
 
 It runs `ruff check`, `pytest -q`, the frontend lint and unit tests, and the production build.
+
+---
+
+## What it watches
+
+| Capability | What you get |
+|---|---|
+| **Device status** | Real-time up / down / degraded state, pushed over WebSockets. |
+| **Network topology** | Interactive React Flow map with link status and port detail. |
+| **Interface utilization** | Bandwidth, errors, and traffic graphs per interface. |
+| **Port groups** | Aggregate traffic for groups of ports matched by description. |
+| **Speedtest** | Scheduled WAN speed tests with historical tracking. |
+| **Alert feed** | Critical / warning / info severities with an acknowledgment workflow. |
+| **Notifications** | Discord, Pushover, and email channels with configurable thresholds. |
+| **Proxmox integration** | VM / LXC status, resource usage, and node details. |
+| **Historical data** | InfluxDB time-series with configurable retention. |
+| **CDP / LLDP discovery** | Automatic topology discovery from LibreNMS. |
+
+Administration covers a web-based settings UI for integrations and thresholds, JWT authentication with role-based permissions, and admin user management.
+
+---
+
+## Tech stack
+
+| Layer | Technology |
+|-------|------------|
+| Frontend | React 18, TypeScript, Tailwind CSS |
+| State | Zustand |
+| Visualization | React Flow, Recharts |
+| Backend | FastAPI, Python 3.12 |
+| Live updates | WebSockets (`/ws/updates`) |
+| Cache | Redis |
+| Time series | InfluxDB |
+| Scheduler | APScheduler |
+| Auth | JWT + bcrypt |
+
+| Integration | Purpose |
+|---|---|
+| **LibreNMS** | Device polling, SNMP data, alerts, CDP/LLDP topology |
+| **Proxmox** | VM/LXC monitoring, node health, storage |
+| **InfluxDB** | Historical metrics and graphs |
+| **Netdisco** | Network inventory (optional) |
 
 ---
 
