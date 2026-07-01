@@ -13,10 +13,10 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/github/actions/workflow/status/lidless-labs/watchtower/ci.yml?branch=main&style=for-the-badge&label=ci" alt="CI status">
-  <img src="https://img.shields.io/badge/python-3.12-blue?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.12">
-  <img src="https://img.shields.io/badge/node-20%2B-339933?style=for-the-badge&logo=node.js&logoColor=white" alt="Node 20+">
-  <img src="https://img.shields.io/badge/license-MIT-green?style=for-the-badge" alt="MIT license">
+  <img src="https://shieldcn.dev/github/ci/lidless-labs/watchtower.svg?branch=main&workflow=ci.yml" alt="CI status">
+  <img src="https://shieldcn.dev/badge/python-3.12-blue.svg?logo=python&logoColor=white" alt="Python 3.12">
+  <img src="https://shieldcn.dev/badge/node-20%2B-339933.svg?logo=node.js&logoColor=white" alt="Node 20+">
+  <img src="https://shieldcn.dev/badge/license-MIT-green.svg" alt="MIT license">
 </p>
 
 Watchtower is a self-hosted Network Operations Center (NOC) dashboard that watches network devices, interfaces, VMs, and alerts through LibreNMS and Proxmox, with WebSocket-driven live updates. It exists because the raw LibreNMS UI is a deep tool built for engineers running it all day, and a general dashboard like Grafana means hand-building every panel and query before you see a single device; Watchtower is the opinionated middle: one console that already knows what a homelab operator wants to see. It is a work in progress, run from source, and is not published to any package registry.
