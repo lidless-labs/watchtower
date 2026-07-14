@@ -2,6 +2,9 @@
   <img src="docs/assets/watchtower-banner.jpg" alt="watchtower banner" width="900">
 </p>
 
+<p align="center">
+  <a href="https://lidless.dev"><img src="docs/assets/marks/watchtower-circle.png" width="48" alt="Lidless Labs"></a>
+</p>
 <h1 align="center">Watchtower</h1>
 
 <p align="center">
@@ -219,3 +222,11 @@ Pulls the latest code, installs dependencies, rebuilds the frontend, and restart
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+---
+
+<p align="center"><a href="https://lidless.dev">Part of <strong>Lidless Labs</strong></a> &middot; the eye does not close</p>
+
+<p align="center"><sub><strong>Network:</strong> <a href="https://github.com/lidless-labs/librenmsctrl">librenmsctrl</a> &middot; <a href="https://github.com/lidless-labs/n8nctrl">n8nctrl</a> &middot; <a href="https://github.com/lidless-labs/portgrid">portgrid</a> &middot; <a href="https://github.com/lidless-labs/cutsheet">cutsheet</a> &middot; <a href="https://github.com/lidless-labs/eero-cli">eero-cli</a></sub></p>
+
+<p align="center"><sub><a href="https://lidless.dev">All tools</a> &middot; <a href="https://github.com/lidless-labs">Lidless Labs on GitHub</a></sub></p>
