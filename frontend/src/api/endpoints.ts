@@ -2,6 +2,8 @@
  * API endpoints. All calls hit the FastAPI backend through the Vite proxy.
  */
 
+import axios, { type AxiosRequestConfig } from 'axios'
+import { apiClient } from './client'
 import type { Topology, TopologySummary } from '../types/topology'
 import type { Device, DeviceSummary } from '../types/device'
 import type { AlertSummary, Alert } from '../types/alert'
@@ -109,38 +111,27 @@ export interface SpeedtestSummary {
 // Auth rides on the HttpOnly session cookie, attached automatically to these
 // same-origin requests; no Authorization header is needed.
 
-// Fetch has no built-in timeout - a stuck request would hang forever
-// and leak the in-flight promise. Mirror the axios client default.
-const FETCH_TIMEOUT_MS = 30_000
+function toApiPath(url: string): string {
+  return url.startsWith('/api') ? url.slice('/api'.length) : url
+}
+
+function toAxiosConfig(init?: RequestInit): AxiosRequestConfig | undefined {
+  if (!init?.signal) {
+    return undefined
+  }
+
+  return { signal: init.signal }
+}
 
 async function fetchJson<T>(url: string, init?: RequestInit, fallback?: T): Promise<T> {
-  const controller = new AbortController()
-  // If the caller passed their own signal, abort our controller when
-  // it fires too (covers component-unmount cancellation).
-  const callerSignal = init?.signal
-  if (callerSignal) {
-    if (callerSignal.aborted) {
-      controller.abort()
-    } else {
-      callerSignal.addEventListener('abort', () => controller.abort(), { once: true })
-    }
-  }
-  const timer = window.setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
-
   try {
-    const res = await fetch(url, {
-      ...init,
-      signal: controller.signal,
-    })
-    if (!res.ok) {
-      if (fallback !== undefined) {
-        return fallback
-      }
-      throw new Error(`Request failed: ${res.status}`)
+    const response = await apiClient.get<T>(toApiPath(url), toAxiosConfig(init))
+    return response.data
+  } catch (error) {
+    if (fallback !== undefined && axios.isAxiosError(error) && error.response) {
+      return fallback
     }
-    return (await res.json()) as T
-  } finally {
-    window.clearTimeout(timer)
+    throw error
   }
 }
 
@@ -174,21 +165,11 @@ export async function fetchAlert(alertId: string): Promise<Alert> {
 }
 
 export async function acknowledgeAlert(alertId: string): Promise<void> {
-  const res = await fetch(`/api/alert/${alertId}/acknowledge`, {
-    method: 'POST',
-  })
-  if (!res.ok) {
-    throw new Error(`Failed to acknowledge alert: ${res.status}`)
-  }
+  await apiClient.post(`/alert/${alertId}/acknowledge`)
 }
 
 export async function resolveAlert(alertId: string): Promise<void> {
-  const res = await fetch(`/api/alert/${alertId}/resolve`, {
-    method: 'POST',
-  })
-  if (!res.ok) {
-    throw new Error(`Failed to resolve alert: ${res.status}`)
-  }
+  await apiClient.post(`/alert/${alertId}/resolve`)
 }
 
 export async function fetchVMs(): Promise<VMListResponse> {

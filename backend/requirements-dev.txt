@@ -11,5 +11,5 @@ pytest-asyncio>=0.21.0
 fakeredis[lua]>=2.20.0  # [lua] extra is required: ratelimit.py uses EVAL scripts
 
 # Lint and dependency audit
-ruff>=0.14.0
+ruff==0.15.20
 pip-audit>=2.9.0
