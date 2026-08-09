@@ -3,6 +3,7 @@ import { useAlertStore } from '../store/alertStore'
 import { useSettingsStore } from '../store/settingsStore'
 import { fetchAlerts, acknowledgeAlert as apiAcknowledgeAlert } from '../api/endpoints'
 import type { Alert } from '../types/alert'
+import { usePollingInterval } from './usePollingInterval'
 
 export function useAlerts() {
   const alerts = useAlertStore((state) => state.alerts)
@@ -18,24 +19,17 @@ export function useAlerts() {
   const criticalOverlayEnabled = useSettingsStore((state) => state.criticalOverlayEnabled)
   const warningAutoDismiss = useSettingsStore((state) => state.warningAutoDismiss)
 
-  // Load initial alerts
-  useEffect(() => {
-    async function loadAlerts() {
-      try {
-        const alertList = await fetchAlerts()
-        // AlertSummary is structurally compatible with Alert (extra fields are optional)
-        setAlerts(alertList as Alert[])
-      } catch (err) {
-        console.error('Failed to load alerts:', err)
-      }
+  // Load initial alerts; pause when the tab is hidden and back off on errors.
+  usePollingInterval(async () => {
+    try {
+      const alertList = await fetchAlerts()
+      // AlertSummary is structurally compatible with Alert (extra fields are optional)
+      setAlerts(alertList as Alert[])
+    } catch (err) {
+      console.error('Failed to load alerts:', err)
+      throw err
     }
-
-    loadAlerts()
-
-    // Refresh alerts periodically
-    const interval = setInterval(loadAlerts, 30000)
-    return () => clearInterval(interval)
-  }, [setAlerts])
+  }, 30_000, [setAlerts])
 
   // Play sound for critical alerts
   const playAlertSound = useCallback(() => {
