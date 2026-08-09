@@ -8,8 +8,9 @@
  * - Storage with usage bars
  */
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { fetchProxmoxNode } from '../../api/endpoints'
+import { usePollingInterval } from '../../hooks/usePollingInterval'
 
 interface NodeInfo {
   node: string
@@ -65,25 +66,19 @@ export default function ProxmoxPanel({ nodeName }: ProxmoxPanelProps) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    const loadData = async () => {
-      try {
-        setLoading(true)
-        setError(null)
-        const nodeData = await fetchProxmoxNode(nodeName)
-        setData(nodeData)
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Unknown error')
-      } finally {
-        setLoading(false)
-      }
+  usePollingInterval(async () => {
+    try {
+      setLoading(true)
+      setError(null)
+      const nodeData = await fetchProxmoxNode(nodeName)
+      setData(nodeData)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error')
+      throw err
+    } finally {
+      setLoading(false)
     }
-
-    loadData()
-    // Refresh every 30 seconds
-    const interval = setInterval(loadData, 30000)
-    return () => clearInterval(interval)
-  }, [nodeName])
+  }, 30_000, [nodeName])
 
   if (loading && !data) {
     return (

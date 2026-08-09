@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { apiClient } from '../../api/client'
+import { usePollingInterval } from '../../hooks/usePollingInterval'
 
 interface TopInterface {
   device: string
@@ -34,15 +35,12 @@ export default function TopInterfacesWidget() {
     } catch (err) {
       console.error('Failed to fetch top interfaces:', err)
       setState('error')
+      throw err
     }
   }
 
-  // Fetch on mount and every 60 seconds
-  useEffect(() => {
-    loadData()
-    const interval = setInterval(loadData, 60000)
-    return () => clearInterval(interval)
-  }, [])
+  // Poll every 60s; pause while the tab is hidden and back off on errors
+  usePollingInterval(loadData, 60_000)
 
   if (state === 'loading') {
     return (
@@ -68,7 +66,9 @@ export default function TopInterfacesWidget() {
         </div>
         <p className="text-sm text-status-red text-center py-2">Failed to load data</p>
         <button
-          onClick={loadData}
+          onClick={() => {
+            void loadData().catch(() => undefined)
+          }}
           className="w-full py-2 text-sm bg-bg-tertiary hover:bg-bg-secondary text-text-primary rounded-lg transition-colors"
         >
           Retry

@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { fetchPortGroups } from '../../api/endpoints'
 import { apiClient } from '../../api/client'
 import type { PortGroupStats } from '../../api/endpoints'
+import { usePollingInterval } from '../../hooks/usePollingInterval'
 
 type WidgetState = 'loading' | 'no_data' | 'ready' | 'error'
 
@@ -11,7 +12,7 @@ export default function PortGroupWidget() {
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
   const [expanded, setExpanded] = useState(true)
 
-  // Fetch port group stats
+  // Fetch port group stats (reject on failure so the poller can back off)
   const loadStats = async () => {
     try {
       const data = await fetchPortGroups()
@@ -26,15 +27,12 @@ export default function PortGroupWidget() {
     } catch (err) {
       console.error('Failed to fetch port group stats:', err)
       setState('error')
+      throw err
     }
   }
 
-  // Fetch on mount and every 60 seconds (matches interface polling)
-  useEffect(() => {
-    loadStats()
-    const interval = setInterval(loadStats, 60000)
-    return () => clearInterval(interval)
-  }, [])
+  // Poll every 60s; pause while the tab is hidden and back off on errors
+  usePollingInterval(loadStats, 60_000)
 
   // Status indicator color
   const statusColor = {
@@ -80,7 +78,9 @@ export default function PortGroupWidget() {
         </div>
         <p className="text-sm text-status-red text-center py-2">Failed to load data</p>
         <button
-          onClick={loadStats}
+          onClick={() => {
+            void loadStats().catch(() => undefined)
+          }}
           className="w-full py-2 text-sm bg-bg-tertiary hover:bg-bg-secondary text-text-primary rounded-lg transition-colors"
         >
           Retry

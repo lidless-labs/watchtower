@@ -9,6 +9,7 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Fixed
 
+- Sidebar and alert polling now pauses while the browser tab is hidden and backs off (1.5×, capped at 5 minutes) on consecutive failures instead of retrying on a fixed interval (#34).
 - Stale REST topology snapshots no longer overwrite fresher websocket device-status updates in the dashboard store (#33).
 
 ### Added
