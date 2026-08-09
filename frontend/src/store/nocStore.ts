@@ -9,6 +9,11 @@ type SpeedtestStatus = 'normal' | 'degraded' | 'down' | null
 interface NocState {
   // Data
   topology: Topology | null
+  // Monotonic counter bumped by live (websocket) topology mutations.
+  // REST snapshots must pass the version observed when the fetch started;
+  // if a fresher WS update landed in flight, setTopology drops the snapshot
+  // so stale device status cannot clobber newer state (issue #33).
+  topologyVersion: number
   selectedDevice: Device | null
   selectedConnection: Connection | null
   speedtestStatus: SpeedtestStatus
@@ -29,7 +34,7 @@ interface NocState {
   sidebarOpen: boolean
 
   // Actions
-  setTopology: (topology: Topology) => void
+  setTopology: (topology: Topology, baseVersion: number) => boolean
   selectDevice: (deviceId: string | null) => void
   selectConnection: (connectionId: string | null) => void
   updateDeviceStatus: (deviceId: string, status: string) => void
@@ -57,6 +62,7 @@ interface NocState {
 export const useNocStore = create<NocState>((set, get) => ({
   // Initial state
   topology: null,
+  topologyVersion: 0,
   selectedDevice: null,
   selectedConnection: null,
   speedtestStatus: null,
@@ -72,7 +78,17 @@ export const useNocStore = create<NocState>((set, get) => ({
   sidebarOpen: true,
 
   // Actions
-  setTopology: (topology) => set({ topology, error: null }),
+  setTopology: (topology, baseVersion) => {
+    // Drop REST snapshots that are older than a concurrent websocket
+    // mutation. baseVersion is the topologyVersion captured when the
+    // fetch started; any intervening updateDeviceStatus / updateAlertCount
+    // bumps the counter and makes this apply a no-op.
+    if (get().topologyVersion !== baseVersion) {
+      return false
+    }
+    set({ topology, error: null })
+    return true
+  },
 
   selectDevice: (deviceId) => {
     const { topology } = get()
@@ -99,7 +115,7 @@ export const useNocStore = create<NocState>((set, get) => ({
   },
 
   updateDeviceStatus: (deviceId, status) => {
-    const { topology } = get()
+    const { topology, topologyVersion } = get()
     if (!topology) return
 
     const device = topology.devices[deviceId]
@@ -134,12 +150,15 @@ export const useNocStore = create<NocState>((set, get) => ({
           devices_up: devicesUp,
           devices_down: devicesDown,
         },
+        // Bump so an in-flight REST snapshot that still has the old
+        // status cannot overwrite this live update.
+        topologyVersion: topologyVersion + 1,
       })
     }
   },
 
   updateAlertCount: (delta) => {
-    const { topology } = get()
+    const { topology, topologyVersion } = get()
     if (!topology) return
 
     set({
@@ -147,6 +166,7 @@ export const useNocStore = create<NocState>((set, get) => ({
         ...topology,
         active_alerts: Math.max(0, topology.active_alerts + delta),
       },
+      topologyVersion: topologyVersion + 1,
     })
   },
 
