@@ -88,8 +88,11 @@ function useDashboardData() {
     async function loadData() {
       setLoading(true)
       try {
+        // Capture version before the await so a concurrent websocket
+        // updateDeviceStatus cannot be clobbered by this snapshot (#33).
+        const baseVersion = useNocStore.getState().topologyVersion
         const topology = await fetchTopology()
-        setTopology(topology)
+        setTopology(topology, baseVersion)
 
         // Load speedtest status for external link coloring
         const speedtest = await fetchSpeedtest()
