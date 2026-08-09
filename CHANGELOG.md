@@ -7,6 +7,10 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ## [Unreleased]
 
+### Fixed
+
+- Stale REST topology snapshots no longer overwrite fresher websocket device-status updates in the dashboard store (#33).
+
 ### Added
 
 - Maintainer-health docs: `SECURITY.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, this changelog, GitHub issue forms, and a pull-request template.
