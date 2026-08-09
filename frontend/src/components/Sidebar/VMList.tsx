@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import clsx from 'clsx'
 import { fetchVMs, type ProxmoxVM, type VMSummary } from '../../api/endpoints'
+import { usePollingInterval } from '../../hooks/usePollingInterval'
 
 interface VMListState {
   vms: ProxmoxVM[]
@@ -70,41 +71,24 @@ export default function VMList() {
   })
   const [expanded, setExpanded] = useState(false)
 
-  useEffect(() => {
-    let mounted = true
-
-    async function loadVMs() {
-      try {
-        const data = await fetchVMs()
-        if (mounted) {
-          setState({
-            vms: data.vms,
-            summary: data.summary,
-            loading: false,
-            error: null,
-          })
-        }
-      } catch (err) {
-        if (mounted) {
-          setState((prev) => ({
-            ...prev,
-            loading: false,
-            error: err instanceof Error ? err.message : 'Failed to load VMs',
-          }))
-        }
-      }
+  usePollingInterval(async () => {
+    try {
+      const data = await fetchVMs()
+      setState({
+        vms: data.vms,
+        summary: data.summary,
+        loading: false,
+        error: null,
+      })
+    } catch (err) {
+      setState((prev) => ({
+        ...prev,
+        loading: false,
+        error: err instanceof Error ? err.message : 'Failed to load VMs',
+      }))
+      throw err
     }
-
-    loadVMs()
-
-    // Poll every 60 seconds
-    const interval = setInterval(loadVMs, 60000)
-
-    return () => {
-      mounted = false
-      clearInterval(interval)
-    }
-  }, [])
+  }, 60_000)
 
   // Don't render if no VMs or error
   if (state.loading) {
