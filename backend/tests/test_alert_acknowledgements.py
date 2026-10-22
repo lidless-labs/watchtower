@@ -174,7 +174,7 @@ async def test_alert_response_size_is_bounded(alert_api):
 
 async def test_successful_upstream_write_remains_success_when_cache_is_unavailable(alert_api, monkeypatch):
     api, _, requests, _, _ = alert_api
-    monkeypatch.setattr(redis_cache, "_client", None)
+    monkeypatch.setattr(routes, "_cache_librenms_state", AsyncMock(side_effect=RuntimeError("example cache unavailable")))
     response = await api.post("/api/alert/librenms-7/acknowledge")
     assert response.status_code == 200
     assert response.json()["status"] == "acknowledged"
@@ -213,3 +213,45 @@ async def test_missing_ack_store_does_not_hide_down_device(alert_api, monkeypatc
     response = await api.get("/api/alerts")
     assert response.status_code == 200
     assert [(a["id"], a["status"]) for a in response.json()] == [("device-down-example", "active")]
+
+
+async def test_stale_poll_cannot_overwrite_completed_acknowledgement(alert_api, monkeypatch):
+    import asyncio
+
+    api, _, requests, responses, _ = alert_api
+    record = {"id": 7, "device_id": 3, "rule_id": 1, "state": 1, "hostname": "example"}
+    responses[("GET", "/api/v0/alerts")] = 200, {"status": "ok", "count": 1, "alerts": [record]}
+    await redis_cache.set(polling.CACHE_ALERTS, [record])
+    fetched = asyncio.Event()
+    release_poll = asyncio.Event()
+    original_set = redis_cache.set
+
+    async def delayed_poll_write(key, value, ttl=None):
+        if key == polling.CACHE_ALERTS:
+            fetched.set()
+            await release_poll.wait()
+        await original_set(key, value, ttl)
+
+    monkeypatch.setattr(redis_cache, "set", delayed_poll_write)
+    poll = asyncio.create_task(polling.poll_alerts())
+    await asyncio.wait_for(fetched.wait(), timeout=5)
+    ack = asyncio.create_task(api.post("/api/alert/librenms-7/acknowledge"))
+    try:
+        # Without coordination the mutation completes before this older poll
+        # writes. With the lock it waits for that poll to release its snapshot.
+        await asyncio.wait({ack}, timeout=1)
+    finally:
+        release_poll.set()
+        await poll
+    response = await ack
+    assert response.status_code == 200
+    assert (await redis_cache.get_json(polling.CACHE_ALERTS))[0]["state"] == 2
+    assert sum(r.method == "PUT" for r in requests) == 1
+
+
+async def test_unavailable_coordination_store_prevents_upstream_mutation(alert_api, monkeypatch):
+    api, _, requests, _, _ = alert_api
+    monkeypatch.setattr(redis_cache, "_client", None)
+    response = await api.post("/api/alert/librenms-7/acknowledge")
+    assert response.status_code == 503
+    assert requests == []

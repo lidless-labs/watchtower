@@ -33,6 +33,7 @@ CACHE_DEVICES = "watchtower:devices"
 CACHE_DEVICE_STATUS = "watchtower:device_status"
 CACHE_ALERTS = "watchtower:alerts"
 CACHE_ACKNOWLEDGED_ALERTS = "watchtower:acknowledged_device_alerts"
+ALERT_POLL_LOCK = "watchtower:alert_poll_lock"
 CACHE_HEALTH = "watchtower:health"
 CACHE_PROXMOX = "watchtower:proxmox"
 CACHE_PROXMOX_VMS = "watchtower:proxmox_vms"
@@ -387,58 +388,68 @@ async def poll_health() -> None:
 
 
 async def poll_alerts() -> None:
-    """Poll active alerts from LibreNMS."""
+    """Serialize upstream snapshots with acknowledgement writes."""
     try:
-        async with LibreNMSClient() as client:
-            alerts = await client.get_active_alerts()
-
-        # Get previous alerts for change detection
-        previous_alerts = await redis_cache.get_json(CACHE_ALERTS) or []
-        previous_ids = {a.get("id") for a in previous_alerts}
-
-        # Build current alerts
-        current_alerts = [
-            {
-                "id": a.id,
-                "device_id": a.device_id,
-                "hostname": a.hostname,
-                "severity": a.severity,
-                "title": a.title,
-                "state": a.state,
-                "timestamp": a.timestamp,
-            }
-            for a in alerts
-        ]
-        current_ids = {a["id"] for a in current_alerts}
-
-        # Detect new alerts
-        new_alert_ids = current_ids - previous_ids
-        resolved_ids = previous_ids - current_ids
-
-        # Cache alerts
-        await redis_cache.set(CACHE_ALERTS, current_alerts)
-
-        # Broadcast if there are new alerts
-        if new_alert_ids:
-            new_alerts = [a for a in current_alerts if a["id"] in new_alert_ids]
-            await broadcast_new_alerts(new_alerts)
-            _fire_and_forget_history(
-                history_writer.write_alert_events(new_alerts, state="active"),
-                "alert_events_active",
-            )
-            logger.info("New alerts detected: %d", len(new_alerts))
-
-        if resolved_ids:
-            resolved_alerts = [a for a in previous_alerts if a.get("id") in resolved_ids]
-            await broadcast_resolved_alerts(list(resolved_ids))
-            _fire_and_forget_history(
-                history_writer.write_alert_events(resolved_alerts, state="resolved"),
-                "alert_events_resolved",
-            )
-            logger.info("Alerts resolved: %d", len(resolved_ids))
-
+        lock = redis_cache.client.lock(ALERT_POLL_LOCK, timeout=120, blocking=False)
+        if not await asyncio.wait_for(lock.acquire(), timeout=5):
+            logger.debug("Skipping alert poll while another worker holds the alert lock")
+            return
+        try:
+            await asyncio.wait_for(_poll_alerts(), timeout=90)
+        finally:
+            await asyncio.wait_for(lock.release(), timeout=3)
     except Exception as e:
         logger.error("Failed to poll alerts: %s", e)
+
+
+async def _poll_alerts() -> None:
+    async with LibreNMSClient() as client:
+        alerts = await client.get_active_alerts()
+
+    # Get previous alerts for change detection
+    previous_alerts = await redis_cache.get_json(CACHE_ALERTS) or []
+    previous_ids = {a.get("id") for a in previous_alerts}
+
+    # Build current alerts
+    current_alerts = [
+        {
+            "id": a.id,
+            "device_id": a.device_id,
+            "hostname": a.hostname,
+            "severity": a.severity,
+            "title": a.title,
+            "state": a.state,
+            "timestamp": a.timestamp,
+        }
+        for a in alerts
+    ]
+    current_ids = {a["id"] for a in current_alerts}
+
+    # Detect new alerts
+    new_alert_ids = current_ids - previous_ids
+    resolved_ids = previous_ids - current_ids
+
+    # Cache alerts
+    await redis_cache.set(CACHE_ALERTS, current_alerts)
+
+    # Broadcast if there are new alerts
+    if new_alert_ids:
+        new_alerts = [a for a in current_alerts if a["id"] in new_alert_ids]
+        await broadcast_new_alerts(new_alerts)
+        _fire_and_forget_history(
+            history_writer.write_alert_events(new_alerts, state="active"),
+            "alert_events_active",
+        )
+        logger.info("New alerts detected: %d", len(new_alerts))
+
+    if resolved_ids:
+        resolved_alerts = [a for a in previous_alerts if a.get("id") in resolved_ids]
+        await broadcast_resolved_alerts(list(resolved_ids))
+        _fire_and_forget_history(
+            history_writer.write_alert_events(resolved_alerts, state="resolved"),
+            "alert_events_resolved",
+        )
+        logger.info("Alerts resolved: %d", len(resolved_ids))
 
 
 async def _clear_recovered_device_acknowledgements() -> None:

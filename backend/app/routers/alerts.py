@@ -16,7 +16,7 @@ from ..cache import redis_cache
 from ..config import get_config
 from ..polling.aggregator import get_aggregated_topology
 from ..polling.librenms import LibreNMSClient
-from ..polling.scheduler import CACHE_ALERTS, CACHE_ACKNOWLEDGED_ALERTS
+from ..polling.scheduler import CACHE_ALERTS, CACHE_ACKNOWLEDGED_ALERTS, ALERT_POLL_LOCK
 from ..models.alert import Alert, AlertStatus, AlertSeverity, AlertSummary
 from ..models.device import DeviceStatus
 from ..services.notification_service import notification_service
@@ -326,24 +326,37 @@ async def _update_alert_acknowledgement(alert_id: str, *, acknowledged: bool) ->
         if not re.fullmatch(r"[1-9][0-9]{0,19}", suffix):
             raise HTTPException(status_code=404, detail="Unknown alert")
         try:
-            async with LibreNMSClient() as client:
-                if acknowledged:
-                    await client.acknowledge_alert(int(suffix))
-                else:
-                    await client.unmute_alert(int(suffix))
-        except (httpx.TimeoutException, TimeoutError) as exc:
-            raise HTTPException(status_code=504, detail="LibreNMS alert update timed out and may have been applied; check status before retrying") from exc
-        except (httpx.HTTPError, httpx.InvalidURL) as exc:
-            raise HTTPException(status_code=502, detail="LibreNMS alert update failed") from exc
+            lock = redis_cache.client.lock(ALERT_POLL_LOCK, timeout=120, blocking_timeout=5)
+            acquired = await asyncio.wait_for(lock.acquire(), timeout=6)
+        except (RedisError, RuntimeError, TimeoutError) as exc:
+            raise HTTPException(status_code=503, detail="Alert coordination store unavailable") from exc
+        if not acquired:
+            raise HTTPException(status_code=503, detail="Alert polling busy; retry later")
         try:
-            cache_updated = await _cache_librenms_state(int(suffix), 2 if acknowledged else 1)
-        except (RedisError, RuntimeError, ValueError, TypeError):
-            cache_updated = False
-        if not cache_updated:
-            logger.warning("LibreNMS alert update succeeded; cached state awaits the next poll")
-        # The upstream acknowledgement is authoritative. A stale cache must not
-        # cause an operator to retry a PUT that appends another upstream note.
-        return cache_updated
+            try:
+                async with LibreNMSClient() as client:
+                    if acknowledged:
+                        await client.acknowledge_alert(int(suffix))
+                    else:
+                        await client.unmute_alert(int(suffix))
+            except (httpx.TimeoutException, TimeoutError) as exc:
+                raise HTTPException(status_code=504, detail="LibreNMS alert update timed out and may have been applied; check status before retrying") from exc
+            except (httpx.HTTPError, httpx.InvalidURL) as exc:
+                raise HTTPException(status_code=502, detail="LibreNMS alert update failed") from exc
+            try:
+                cache_updated = await asyncio.wait_for(_cache_librenms_state(int(suffix), 2 if acknowledged else 1), timeout=3)
+            except (RedisError, RuntimeError, ValueError, TypeError, TimeoutError):
+                cache_updated = False
+            if not cache_updated:
+                logger.warning("LibreNMS alert update succeeded; cached state awaits the next poll")
+            # The upstream acknowledgement is authoritative. A stale cache must not
+            # cause an operator to retry a PUT that appends another upstream note.
+            return cache_updated
+        finally:
+            try:
+                await asyncio.wait_for(lock.release(), timeout=3)
+            except (RedisError, RuntimeError, TimeoutError):
+                logger.warning("Alert update lock could not be released; its lease will expire")
     elif alert_id.startswith("device-down-") and alert_id.removeprefix("device-down-"):
         if acknowledged:
             topology = await get_aggregated_topology()
