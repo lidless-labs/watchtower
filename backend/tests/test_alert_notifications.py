@@ -190,3 +190,69 @@ async def test_scheduler_stop_waits_for_inflight_alert_producer(alert_poll):
         await stop_task
         await drain()
     assert dispatch.await_count == 1
+
+
+async def test_upstream_acknowledgement_never_looks_like_recovery(alert_poll, monkeypatch):
+    from contextlib import asynccontextmanager
+    from httpx import MockTransport, Response
+    from app.polling.librenms import LibreNMSClient
+
+    _, _, dispatch = alert_poll
+    current_state = 1
+    requests = []
+
+    def respond(request):
+        requests.append(request)
+        included = str(current_state) in request.url.params.get("state", "").split(",")
+        records = [upstream_alert(state=current_state).model_dump()] if included else []
+        return Response(200, json={"status": "ok", "count": len(records), "alerts": records})
+
+    @asynccontextmanager
+    async def client():
+        upstream = LibreNMSClient(base_url="https://example", api_key="example")
+        async with AsyncClient(transport=MockTransport(respond), base_url="https://example/api/v0") as transport:
+            upstream._client = transport
+            yield upstream
+
+    monkeypatch.setattr(polling, "LibreNMSClient", client)
+    await polling.poll_alerts()
+    await drain()
+    assert dispatch.await_count == 1
+    current_state = 2
+    await polling.poll_alerts()
+    await drain()
+    assert dispatch.await_count == 1
+    assert [r.url.params.get("state") for r in requests] == ["1,2", "1,2"]
+
+
+@pytest.mark.parametrize("kind", ["error", "partial", "oversized"])
+async def test_invalid_upstream_snapshot_does_not_send_false_recovery(alert_poll, monkeypatch, kind):
+    from contextlib import asynccontextmanager
+    from httpx import MockTransport, Response
+    from app.polling.librenms import LibreNMSClient
+
+    upstream, _, dispatch = alert_poll
+    upstream.get_active_alerts.return_value = [upstream_alert()]
+    await polling.poll_alerts()
+    await drain()
+    assert dispatch.await_count == 1
+    payload = {"status": "ok", "count": 0, "alerts": []}
+    if kind == "error":
+        payload["status"] = "error"
+    elif kind == "partial":
+        payload["count"] = 1
+    else:
+        payload["padding"] = "x" * (2 * 1024 * 1024)
+
+    @asynccontextmanager
+    async def client():
+        upstream = LibreNMSClient(base_url="https://example", api_key="example")
+        transport = MockTransport(lambda _: Response(200, json=payload))
+        async with AsyncClient(transport=transport, base_url="https://example/api/v0") as http:
+            upstream._client = http
+            yield upstream
+
+    monkeypatch.setattr(polling, "LibreNMSClient", client)
+    await polling.poll_alerts()
+    await drain()
+    assert dispatch.await_count == 1
