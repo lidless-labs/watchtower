@@ -256,3 +256,34 @@ async def test_invalid_upstream_snapshot_does_not_send_false_recovery(alert_poll
     await polling.poll_alerts()
     await drain()
     assert dispatch.await_count == 1
+
+
+async def test_recovery_waits_for_persisted_baseline_and_retries_once(alert_poll, monkeypatch):
+    from redis.exceptions import ConnectionError
+    from app.services.alert_service import CACHE_NOTIFICATION_ALERTS
+
+    upstream, _, dispatch = alert_poll
+    upstream.get_active_alerts.return_value = [upstream_alert()]
+    await polling.poll_alerts()
+    await drain()
+    assert dispatch.await_count == 1
+    upstream.get_active_alerts.return_value = []
+    original_set = polling.redis_cache.set
+
+    async def failed_baseline_write(key, value, ttl=None):
+        if key == CACHE_NOTIFICATION_ALERTS:
+            raise ConnectionError("example transient write failure")
+        await original_set(key, value, ttl)
+
+    monkeypatch.setattr(polling.redis_cache, "set", failed_baseline_write)
+    await polling.poll_alerts()
+    await drain()
+    assert dispatch.await_count == 1
+    monkeypatch.setattr(polling.redis_cache, "set", original_set)
+    await polling.poll_alerts()
+    await drain()
+    assert dispatch.await_count == 2
+    assert dispatch.call_args.kwargs["is_recovery"] is True
+    await polling.poll_alerts()
+    await drain()
+    assert dispatch.await_count == 2

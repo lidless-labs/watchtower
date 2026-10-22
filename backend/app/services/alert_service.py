@@ -111,6 +111,8 @@ async def _notify_new_alerts(alerts: list[Alert]) -> None:
 
     config_dict = get_config().model_dump()
 
+    # Publish jobs only after the transition baseline is durable.
+    await redis_cache.set(CACHE_NOTIFICATION_ALERTS, current_ids)
     await ensure_notification_worker()
     alert_map = {a.id: a for a in alerts}
 
@@ -140,8 +142,6 @@ async def _notify_new_alerts(alerts: list[Alert]) -> None:
             config=config_dict,
             is_recovery=True,
         ))
-
-    await redis_cache.set(CACHE_NOTIFICATION_ALERTS, current_ids)
 
 
 async def _get_device_down_alerts() -> list[Alert]:
