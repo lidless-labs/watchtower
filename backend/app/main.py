@@ -20,7 +20,7 @@ from .config import (
 from .polling import scheduler
 from .logging_utils import log_event
 from .routers import alerts_router, devices_router, topology_router, history_router, settings_router
-from .routers.alerts import shutdown_notification_worker
+from .services.alert_service import shutdown_notification_worker
 from .routers.auth_router import router as auth_router
 from .routers.diagnostics import router as diagnostics_router
 from .routers.discovery import router as discovery_router
@@ -97,12 +97,14 @@ async def lifespan(app: FastAPI):
         with contextlib.suppress(asyncio.CancelledError):
             await revalidate_task
 
+    # Stop notification producers before draining their queue.
+    await scheduler.stop()
+    await shutdown_notification_worker()
+
     # Shutdown
     if settings.influxdb_enabled:
         from .history.client import influx_client
         await influx_client.disconnect()
-    await shutdown_notification_worker()
-    await scheduler.stop()
     await redis_cache.disconnect()
 
 

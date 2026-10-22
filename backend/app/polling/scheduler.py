@@ -25,6 +25,7 @@ from app.polling.speedtest import (
     cache_result,
 )
 from app.websocket import ws_manager
+from app.services.alert_service import get_alerts, _notify_new_alerts
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,7 @@ CACHE_LINKS = "watchtower:links"
 CACHE_VLANS = "watchtower:vlans"
 CACHE_VLAN_MEMBERSHIPS = "watchtower:vlan_memberships"
 CACHE_LAST_POLL = "watchtower:last_poll"
+_active_alert_polls: set[asyncio.Task] = set()
 
 
 class PollingScheduler:
@@ -164,6 +166,8 @@ class PollingScheduler:
         if self._scheduler:
             self._scheduler.shutdown(wait=False)
             logger.info("Polling scheduler stopped")
+        if _active_alert_polls:
+            await asyncio.gather(*list(_active_alert_polls), return_exceptions=True)
 
     async def poll_now(self) -> None:
         """Trigger an immediate poll of all sources."""
@@ -383,56 +387,74 @@ async def poll_health() -> None:
 
 async def poll_alerts() -> None:
     """Poll active alerts from LibreNMS."""
+    task = asyncio.current_task()
+    _active_alert_polls.add(task)
     try:
-        async with LibreNMSClient() as client:
-            alerts = await client.get_active_alerts()
-
-        # Get previous alerts for change detection
-        previous_alerts = await redis_cache.get_json(CACHE_ALERTS) or []
-        previous_ids = {a.get("id") for a in previous_alerts}
-
-        # Build current alerts
-        current_alerts = [
-            {
-                "id": a.id,
-                "device_id": a.device_id,
-                "hostname": a.hostname,
-                "severity": a.severity,
-                "title": a.title,
-                "timestamp": a.timestamp,
-            }
-            for a in alerts
-        ]
-        current_ids = {a["id"] for a in current_alerts}
-
-        # Detect new alerts
-        new_alert_ids = current_ids - previous_ids
-        resolved_ids = previous_ids - current_ids
-
-        # Cache alerts
-        await redis_cache.set(CACHE_ALERTS, current_alerts)
-
-        # Broadcast if there are new alerts
-        if new_alert_ids:
-            new_alerts = [a for a in current_alerts if a["id"] in new_alert_ids]
-            await broadcast_new_alerts(new_alerts)
-            _fire_and_forget_history(
-                history_writer.write_alert_events(new_alerts, state="active"),
-                "alert_events_active",
-            )
-            logger.info("New alerts detected: %d", len(new_alerts))
-
-        if resolved_ids:
-            resolved_alerts = [a for a in previous_alerts if a.get("id") in resolved_ids]
-            await broadcast_resolved_alerts(list(resolved_ids))
-            _fire_and_forget_history(
-                history_writer.write_alert_events(resolved_alerts, state="resolved"),
-                "alert_events_resolved",
-            )
-            logger.info("Alerts resolved: %d", len(resolved_ids))
-
+        # Serialize the fetch and transition snapshot across scheduler workers.
+        lock = redis_cache.client.lock("watchtower:alert_poll_lock", timeout=120, blocking=False)
+        if not await lock.acquire():
+            logger.debug("Skipping alert poll while another worker is polling")
+            return
+        try:
+            await asyncio.wait_for(_poll_alerts(), timeout=90)
+        finally:
+            await lock.release()
     except Exception as e:
         logger.error("Failed to poll alerts: %s", e)
+    finally:
+        _active_alert_polls.discard(task)
+
+
+async def _poll_alerts() -> None:
+    async with LibreNMSClient() as client:
+        alerts = await client.get_active_alerts()
+
+    # Get previous alerts for change detection
+    previous_alerts = await redis_cache.get_json(CACHE_ALERTS) or []
+    previous_ids = {a.get("id") for a in previous_alerts}
+
+    # Build current alerts
+    current_alerts = [
+        {
+            "id": a.id,
+            "device_id": a.device_id,
+            "hostname": a.hostname,
+            "severity": a.severity,
+            "title": a.title,
+            "state": a.state,
+            "timestamp": a.timestamp,
+        }
+        for a in alerts
+    ]
+    current_ids = {a["id"] for a in current_alerts}
+
+    # Detect new alerts
+    new_alert_ids = current_ids - previous_ids
+    resolved_ids = previous_ids - current_ids
+
+    # Cache alerts
+    await redis_cache.set(CACHE_ALERTS, current_alerts)
+
+    # Broadcast if there are new alerts
+    if new_alert_ids:
+        new_alerts = [a for a in current_alerts if a["id"] in new_alert_ids]
+        await broadcast_new_alerts(new_alerts)
+        _fire_and_forget_history(
+            history_writer.write_alert_events(new_alerts, state="active"),
+            "alert_events_active",
+        )
+        logger.info("New alerts detected: %d", len(new_alerts))
+
+    if resolved_ids:
+        resolved_alerts = [a for a in previous_alerts if a.get("id") in resolved_ids]
+        await broadcast_resolved_alerts(list(resolved_ids))
+        _fire_and_forget_history(
+            history_writer.write_alert_events(resolved_alerts, state="resolved"),
+            "alert_events_resolved",
+        )
+        logger.info("Alerts resolved: %d", len(resolved_ids))
+
+    await _notify_new_alerts(await get_alerts(strict=True))
 
 
 async def poll_links() -> None:
