@@ -7,6 +7,9 @@ API docs: https://docs.librenms.org/API/
 
 from __future__ import annotations
 
+import asyncio
+import json
+
 import httpx
 from typing import Any
 from urllib.parse import quote
@@ -208,21 +211,71 @@ class LibreNMSClient:
         Get alerts
 
         Args:
-            state: Filter by state - "ok", "alert", "ack", or None for all
+            state: Filter by state - "ok", "alert", "ack", "open", or None
         """
         params = {}
         if state:
             # LibreNMS uses numeric states: 0=ok, 1=alert, 2=ack
-            state_map = {"ok": 0, "alert": 1, "ack": 2}
+            state_map = {"ok": 0, "alert": 1, "ack": 2, "open": "1,2"}
             if state in state_map:
                 params["state"] = state_map[state]
 
-        data = await self._get("/alerts", params=params if params else None)
-        return [LibreNMSAlert(**a) for a in data.get("alerts", [])]
+        data = await self._alert_request("GET", "/alerts", params=params or None)
+        alerts = data.get("alerts")
+        if not isinstance(alerts, list) or len(alerts) > 10000:
+            raise httpx.HTTPError("Invalid or oversized LibreNMS alert listing")
+        # This endpoint has no documented pagination. Reject partial snapshots
+        # instead of interpreting an omitted page as resolved alerts.
+        try:
+            count = int(data.get("count", len(alerts)))
+        except (TypeError, ValueError) as exc:
+            raise httpx.HTTPError("Invalid LibreNMS alert count") from exc
+        if count != len(alerts):
+            raise httpx.HTTPError("Incomplete LibreNMS alert listing")
+        return [LibreNMSAlert(**a) for a in alerts]
 
     async def get_active_alerts(self) -> list[LibreNMSAlert]:
-        """Get only active (firing) alerts"""
-        return await self.get_alerts(state="alert")
+        """Get open alerts, including acknowledgements made in LibreNMS."""
+        alerts = await self.get_alerts(state="open")
+        return [alert for alert in alerts if alert.state in (1, 2)]
+
+    async def _alert_request(
+        self, method: str, endpoint: str, *, params: dict | None = None,
+        payload: dict | None = None,
+    ) -> dict[str, Any]:
+        """Bound alert responses and reject API-level failures, including HTTP 200."""
+        if not self._client:
+            raise RuntimeError("Client not initialized. Use 'async with' context manager.")
+        async with asyncio.timeout(35):
+            async with self._client.stream(method, endpoint, params=params, json=payload) as response:
+                response.raise_for_status()
+                content = bytearray()
+                async for chunk in response.aiter_bytes(chunk_size=65536):
+                    if len(content) + len(chunk) > 2 * 1024 * 1024:
+                        raise httpx.HTTPError("LibreNMS alert response exceeds size limit")
+                    content.extend(chunk)
+        try:
+            data = json.loads(content)
+        except ValueError as exc:
+            raise httpx.HTTPError("Invalid LibreNMS alert response") from exc
+        if not isinstance(data, dict) or data.get("status") != "ok":
+            raise httpx.HTTPError("LibreNMS rejected alert request")
+        return data
+
+    async def acknowledge_alert(
+        self, alert_id: int, note: str | None = None, until_clear: bool = True,
+    ) -> None:
+        """Acknowledge via the documented alerts alias without retrying writes."""
+        payload = {"note": note or "", "until_clear": until_clear}
+        result = await self._alert_request("PUT", f"/alerts/{_path_segment(alert_id)}", payload=payload)
+        if str(result.get("message", "")).casefold() != "alert has been acknowledged":
+            raise httpx.HTTPError("LibreNMS acknowledgement was not applied")
+
+    async def unmute_alert(self, alert_id: int) -> None:
+        """Unmute an alert via the documented alerts alias."""
+        result = await self._alert_request("PUT", f"/alerts/unmute/{_path_segment(alert_id)}", payload={"note": ""})
+        if str(result.get("message", "")).casefold() != "alert has been unmuted":
+            raise httpx.HTTPError("LibreNMS unmute was not applied")
 
     # ─────────────────────────────────────────────────────────────
     # Link/Neighbor endpoints (CDP/LLDP discovery)

@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 CACHE_DEVICES = "watchtower:devices"
 CACHE_DEVICE_STATUS = "watchtower:device_status"
 CACHE_ALERTS = "watchtower:alerts"
+CACHE_ACKNOWLEDGED_ALERTS = "watchtower:acknowledged_device_alerts"
 CACHE_HEALTH = "watchtower:health"
 CACHE_PROXMOX = "watchtower:proxmox"
 CACHE_PROXMOX_VMS = "watchtower:proxmox_vms"
@@ -250,6 +251,10 @@ async def poll_device_status() -> None:
         # Cache full device data
         device_data = [_librenms_device_to_dict(d) for d in devices]
         await redis_cache.set(CACHE_DEVICES, device_data)
+        try:
+            await _clear_recovered_device_acknowledgements()
+        except Exception:
+            logger.exception("Device acknowledgement cleanup failed; continuing device polling")
 
         # Record poll time
         await redis_cache.set(CACHE_LAST_POLL, {
@@ -399,6 +404,7 @@ async def poll_alerts() -> None:
                 "hostname": a.hostname,
                 "severity": a.severity,
                 "title": a.title,
+                "state": a.state,
                 "timestamp": a.timestamp,
             }
             for a in alerts
@@ -433,6 +439,18 @@ async def poll_alerts() -> None:
 
     except Exception as e:
         logger.error("Failed to poll alerts: %s", e)
+
+
+async def _clear_recovered_device_acknowledgements() -> None:
+    """Expire local acknowledgements only after a known device recovery."""
+    from app.models.device import DeviceStatus
+    from app.polling.aggregator import get_aggregated_topology
+
+    topology = await get_aggregated_topology()
+    recovered = [f"device-down-{device_id}" for device_id, device in topology.devices.items()
+                 if device.status == DeviceStatus.UP]
+    if recovered:
+        await redis_cache.srem(CACHE_ACKNOWLEDGED_ALERTS, *recovered)
 
 
 async def poll_links() -> None:
