@@ -400,6 +400,7 @@ async def poll_alerts() -> None:
                 "severity": a.severity,
                 "title": a.title,
                 "timestamp": a.timestamp,
+                "state": a.state,
             }
             for a in alerts
         ]

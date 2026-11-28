@@ -19,6 +19,10 @@ def _path_segment(value: int | str) -> str:
     return quote(str(value), safe="")
 
 
+class LibreNMSAPIError(RuntimeError):
+    """LibreNMS returned a response that indicates a rejected operation."""
+
+
 class LibreNMSDevice(BaseModel):
     """Device data from LibreNMS API"""
     device_id: int
@@ -221,8 +225,44 @@ class LibreNMSClient:
         return [LibreNMSAlert(**a) for a in data.get("alerts", [])]
 
     async def get_active_alerts(self) -> list[LibreNMSAlert]:
-        """Get only active (firing) alerts"""
-        return await self.get_alerts(state="alert")
+        """Get active and acknowledged alerts."""
+        active_alerts = await self.get_alerts(state="alert")
+        acknowledged_alerts = await self.get_alerts(state="ack")
+        return active_alerts + acknowledged_alerts
+
+    async def acknowledge_alert(
+        self,
+        alert_id: int | str,
+        note: str | None = None,
+        until_clear: bool = True,
+    ) -> None:
+        """Acknowledge an alert in LibreNMS."""
+        if not self._client:
+            raise RuntimeError("Client not initialized. Use 'async with' context manager.")
+
+        payload: dict[str, Any] = {"until_clear": until_clear}
+        if note is not None:
+            payload["note"] = note
+
+        response = await self._client.put(
+            f"/alerts/{_path_segment(alert_id)}",
+            json=payload,
+        )
+        response.raise_for_status()
+        data = response.json()
+        if not isinstance(data, dict) or data.get("status") != "ok":
+            raise LibreNMSAPIError("LibreNMS rejected the alert acknowledgement")
+
+    async def unmute_alert(self, alert_id: int | str) -> None:
+        """Unmute an alert in LibreNMS."""
+        if not self._client:
+            raise RuntimeError("Client not initialized. Use 'async with' context manager.")
+
+        response = await self._client.put(f"/alerts/unmute/{_path_segment(alert_id)}")
+        response.raise_for_status()
+        data = response.json()
+        if not isinstance(data, dict) or data.get("status") != "ok":
+            raise LibreNMSAPIError("LibreNMS rejected the alert unmute request")
 
     # ─────────────────────────────────────────────────────────────
     # Link/Neighbor endpoints (CDP/LLDP discovery)

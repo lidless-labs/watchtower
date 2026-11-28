@@ -5,11 +5,13 @@ import logging
 from collections.abc import Awaitable, Callable
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
+import httpx
 
 from ..auth import require_operator
 from ..cache import redis_cache
 from ..config import get_config
 from ..polling.aggregator import get_aggregated_topology
+from ..polling.librenms import LibreNMSAPIError, LibreNMSClient
 from ..polling.scheduler import CACHE_ALERTS
 from ..models.alert import Alert, AlertStatus, AlertSeverity, AlertSummary
 from ..models.device import DeviceStatus
@@ -19,8 +21,7 @@ logger = logging.getLogger("watchtower.alerts")
 
 router = APIRouter()
 
-# In-memory acknowledgment tracking (persists until service restart)
-_acknowledged_alerts: set[str] = set()
+CACHE_ACKNOWLEDGED_ALERTS = "watchtower:acknowledged_alerts"
 # Track previously seen active alerts (id -> device_id) for notification dispatch
 _previously_seen_alerts: dict[str, str] = {}
 
@@ -161,6 +162,7 @@ async def _get_device_down_alerts() -> list[Alert]:
 
     try:
         topology = await get_aggregated_topology()
+        acknowledged_alerts = await redis_cache.smembers(CACHE_ACKNOWLEDGED_ALERTS)
 
         for device_id, device in topology.devices.items():
             if device.status == DeviceStatus.DOWN:
@@ -171,7 +173,11 @@ async def _get_device_down_alerts() -> list[Alert]:
                     severity=AlertSeverity.CRITICAL,
                     message=f"Device unreachable: {device.display_name}",
                     details=f"IP: {device.ip or 'unknown'}",
-                    status=AlertStatus.ACKNOWLEDGED if alert_id in _acknowledged_alerts else AlertStatus.ACTIVE,
+                    status=(
+                        AlertStatus.ACKNOWLEDGED
+                        if alert_id in acknowledged_alerts
+                        else AlertStatus.ACTIVE
+                    ),
                     timestamp=device.last_seen or datetime.utcnow(),
                 ))
     except Exception:
@@ -216,7 +222,11 @@ async def _get_librenms_alerts() -> list[Alert]:
                 severity=severity,
                 message=alert.get("name") or alert.get("rule") or "LibreNMS Alert",
                 details=alert.get("notes"),
-                status=AlertStatus.ACKNOWLEDGED if alert_id in _acknowledged_alerts else AlertStatus.ACTIVE,
+                status=(
+                    AlertStatus.ACKNOWLEDGED
+                    if alert.get("state") == 2
+                    else AlertStatus.ACTIVE
+                ),
                 timestamp=timestamp,
             ))
     except Exception:
@@ -272,12 +282,36 @@ async def get_alert(alert_id: str):
 @router.post("/alert/{alert_id}/acknowledge", dependencies=[Depends(require_operator)])
 async def acknowledge_alert(alert_id: str):
     """Acknowledge an alert."""
-    _acknowledged_alerts.add(alert_id)
+    if alert_id.startswith("librenms-"):
+        librenms_alert_id = alert_id.removeprefix("librenms-")
+        try:
+            async with LibreNMSClient() as client:
+                await client.acknowledge_alert(librenms_alert_id)
+        except (httpx.HTTPError, LibreNMSAPIError) as exc:
+            logger.warning("LibreNMS acknowledgement failed for %s: %s", alert_id, exc)
+            raise HTTPException(
+                status_code=502,
+                detail="LibreNMS rejected the alert acknowledgement",
+            ) from exc
+    else:
+        await redis_cache.sadd(CACHE_ACKNOWLEDGED_ALERTS, alert_id)
     return {"status": "acknowledged", "alert_id": alert_id}
 
 
 @router.post("/alert/{alert_id}/resolve", dependencies=[Depends(require_operator)])
 async def resolve_alert(alert_id: str):
     """Resolve an alert (removes from acknowledged set)."""
-    _acknowledged_alerts.discard(alert_id)
+    if alert_id.startswith("librenms-"):
+        librenms_alert_id = alert_id.removeprefix("librenms-")
+        try:
+            async with LibreNMSClient() as client:
+                await client.unmute_alert(librenms_alert_id)
+        except (httpx.HTTPError, LibreNMSAPIError) as exc:
+            logger.warning("LibreNMS unmute failed for %s: %s", alert_id, exc)
+            raise HTTPException(
+                status_code=502,
+                detail="LibreNMS rejected the alert unmute request",
+            ) from exc
+    else:
+        await redis_cache.srem(CACHE_ACKNOWLEDGED_ALERTS, alert_id)
     return {"status": "resolved", "alert_id": alert_id}
