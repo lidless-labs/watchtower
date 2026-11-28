@@ -47,9 +47,11 @@ async def test_diagnostics_routes_reject_viewer():
 async def test_operator_mutation_routes_reject_viewer():
     async with _make_client(watchtower_app) as client:
         alert_response = await client.post("/api/alert/1/acknowledge", headers=_headers("viewer"))
+        resolve_response = await client.post("/api/alert/1/resolve", headers=_headers("viewer"))
         speedtest_response = await client.post("/api/speedtest/trigger", headers=_headers("viewer"))
 
     assert alert_response.status_code == 403
+    assert resolve_response.status_code == 403
     assert speedtest_response.status_code == 403
 
 

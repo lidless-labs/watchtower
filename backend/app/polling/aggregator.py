@@ -21,7 +21,7 @@ from app.models.vlan import (
     Vlan, VlanMembership, L3Topology, L3TopologyNode, L3TopologyVlanGroup
 )
 from app.polling.scheduler import (
-    CACHE_DEVICES, CACHE_ALERTS, CACHE_HEALTH, CACHE_LINKS,
+    CACHE_DEVICES, CACHE_ALERTS, CACHE_ALERT_ACK_OVERLAY, CACHE_HEALTH, CACHE_LINKS,
     CACHE_PROXMOX, CACHE_PROXMOX_VMS, CACHE_VLANS, CACHE_VLAN_MEMBERSHIPS
 )
 
@@ -223,6 +223,7 @@ async def get_aggregated_topology() -> Topology:
     # Load cached LibreNMS data
     librenms_devices = await redis_cache.get_json(CACHE_DEVICES) or []
     librenms_alerts = await redis_cache.get_json(CACHE_ALERTS) or []
+    ack_overlay_ids = await redis_cache.smembers(CACHE_ALERT_ACK_OVERLAY)
     health_data = await redis_cache.get_json(CACHE_HEALTH) or {}
 
     # Load cached Proxmox data (fallback for Linux hosts and for proxmox_stats)
@@ -232,9 +233,11 @@ async def get_aggregated_topology() -> Topology:
     # Build lookup indexes
     by_ip, by_hostname = build_librenms_indexes(librenms_devices)
 
-    # Count alerts per device
+    # Device alert_count tracks unresolved alerts, including acknowledged ones.
     alerts_by_device: dict[int, int] = {}
     for alert in librenms_alerts:
+        if alert.get("state") not in (1, 2):
+            continue
         device_id = alert.get("device_id")
         if device_id:
             alerts_by_device[device_id] = alerts_by_device.get(device_id, 0) + 1
@@ -566,7 +569,11 @@ async def get_aggregated_topology() -> Topology:
     total_devices = len(devices)
     devices_up = sum(1 for d in devices.values() if d.status == DeviceStatus.UP)
     devices_down = sum(1 for d in devices.values() if d.status == DeviceStatus.DOWN)
-    active_alerts = len(librenms_alerts)
+    active_alerts = sum(
+        1
+        for alert in librenms_alerts
+        if alert.get("state") == 1 and str(alert.get("id")) not in ack_overlay_ids
+    )
 
     return Topology(
         devices=devices,

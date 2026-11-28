@@ -1,8 +1,10 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useAlerts } from '../../hooks/useAlerts'
 import { useNocStore } from '../../store/nocStore'
 
 export default function CriticalOverlay() {
+  const [acknowledging, setAcknowledging] = useState(false)
+  const [acknowledgementError, setAcknowledgementError] = useState('')
   const {
     criticalOverlay,
     criticalOverlayEnabled,
@@ -51,9 +53,20 @@ export default function CriticalOverlay() {
     return null
   }
 
-  const handleAcknowledge = () => {
-    acknowledgeAlert(criticalOverlay.id)
-    clearCriticalOverlay()
+  const handleAcknowledge = async () => {
+    if (!criticalOverlay || acknowledging) return
+
+    setAcknowledging(true)
+    setAcknowledgementError('')
+    try {
+      await acknowledgeAlert(criticalOverlay.id)
+      setAcknowledgementError('')
+      clearCriticalOverlay()
+    } catch {
+      setAcknowledgementError('Failed to acknowledge alert. Please try again.')
+    } finally {
+      setAcknowledging(false)
+    }
   }
 
   const handleViewDevice = () => {
@@ -112,10 +125,11 @@ export default function CriticalOverlay() {
         {/* Actions */}
         <div className="flex justify-center gap-4 mt-8">
           <button
-            onClick={handleAcknowledge}
+            onClick={() => void handleAcknowledge()}
+            disabled={acknowledging}
             className="px-6 py-3 bg-status-red hover:bg-status-red/80 text-white font-semibold rounded-lg transition-colors"
           >
-            Acknowledge
+            {acknowledging ? 'Acknowledging…' : 'Acknowledge'}
           </button>
           <button
             onClick={handleViewDevice}
@@ -124,6 +138,11 @@ export default function CriticalOverlay() {
             View Device
           </button>
         </div>
+        {acknowledgementError && (
+          <p className="mt-4 text-sm text-status-red" role="alert">
+            {acknowledgementError}
+          </p>
+        )}
       </div>
     </div>
   )
