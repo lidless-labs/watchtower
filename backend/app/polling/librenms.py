@@ -212,12 +212,16 @@ class LibreNMSClient:
         hostname: str,
         kind: Literal["eventlog", "syslog", "alertlog"],
         limit: int = 50,
-        start: int = 1,
+        start: int = 0,
         from_: str | None = None,
         to: str | None = None,
     ) -> list[DeviceLogEntry]:
         """Read a device's event, syslog, or alert log from LibreNMS."""
-        params: dict[str, int | str] = {"limit": limit, "start": start}
+        params: dict[str, int | str] = {
+            "limit": limit,
+            "start": start,
+            "sortorder": "DESC",
+        }
         if from_ is not None:
             params["from"] = from_
         if to is not None:
@@ -229,20 +233,48 @@ class LibreNMSClient:
         )
         if not isinstance(data, dict) or not isinstance(data.get("logs", []), list):
             raise ValueError("LibreNMS returned an invalid log response")
-        return [
-            DeviceLogEntry(
-                timestamp=str(entry.get("datetime") or entry.get("timestamp") or ""),
-                type=entry.get("type"),
-                severity=(
-                    str(entry["severity"])
-                    if entry.get("severity") is not None
-                    else None
-                ),
-                message=str(entry.get("message") or ""),
+        normalized: list[DeviceLogEntry] = []
+        for entry in data.get("logs", []):
+            if not isinstance(entry, dict):
+                continue
+
+            timestamp = (
+                entry.get("datetime")
+                or entry.get("timestamp")
+                or entry.get("time_logged")
+                or ""
             )
-            for entry in data.get("logs", [])
-            if isinstance(entry, dict)
-        ]
+            severity = next(
+                (
+                    entry[field]
+                    for field in ("severity", "level", "state")
+                    if entry.get(field) not in (None, "")
+                ),
+                None,
+            )
+            message = entry.get("message") or entry.get("msg")
+
+            if kind == "alertlog" and not message:
+                state = str(entry.get("state", "unknown"))
+                state_label = {"0": "clear", "1": "alert", "2": "ack"}.get(
+                    state, f"state {state}"
+                )
+                rule_id = entry.get("rule_id")
+                message = f"Rule {rule_id}: {state_label}" if rule_id is not None else state_label
+                details = entry.get("details")
+                if details:
+                    message = f"{message} - {details}"
+
+            normalized.append(
+                DeviceLogEntry(
+                    timestamp=str(timestamp),
+                    type=entry.get("type") or entry.get("program"),
+                    severity=str(severity) if severity is not None else None,
+                    message=str(message or ""),
+                )
+            )
+
+        return normalized
 
     # ─────────────────────────────────────────────────────────────
     # Port/Interface endpoints

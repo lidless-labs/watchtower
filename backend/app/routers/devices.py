@@ -6,6 +6,7 @@ from typing import Literal
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import ValidationError
 
 from ..auth import require_viewer
 from ..cache import redis_cache
@@ -66,7 +67,7 @@ async def get_device_logs(
     device_id: str,
     kind: Literal["eventlog", "syslog", "alertlog"] = Query("eventlog"),
     limit: int = Query(50, ge=1, le=200),
-    start: int = Query(1, ge=1),
+    start: int = Query(0, ge=0, le=10000),
     from_: str | None = Query(None, alias="from", max_length=100),
     to: str | None = Query(None, max_length=100),
 ) -> list[DeviceLogEntry]:
@@ -87,9 +88,11 @@ async def get_device_logs(
         ),
         None,
     )
-    hostname = librenms_device.get("hostname") if librenms_device else None
-    if not hostname:
-        raise HTTPException(status_code=502, detail="Device is not available in LibreNMS")
+    hostname = (
+        librenms_device.get("hostname")
+        if librenms_device
+        else str(device.librenms_device_id)
+    ) or str(device.librenms_device_id)
 
     cache_parameters = json.dumps(
         [device_id, kind, limit, start, from_, to],
@@ -97,9 +100,19 @@ async def get_device_logs(
     )
     cache_digest = hashlib.sha256(cache_parameters.encode("utf-8")).hexdigest()
     cache_key = f"watchtower:device_logs:{cache_digest}"
-    cached = await redis_cache.get_json(cache_key)
-    if cached is not None:
-        return [DeviceLogEntry.model_validate(entry) for entry in cached]
+    if from_ is None and to is None:
+        try:
+            cached = await redis_cache.get_json(cache_key)
+        except (TypeError, ValueError):
+            cached = None
+            await redis_cache.delete(cache_key)
+        if cached is not None:
+            if isinstance(cached, list):
+                try:
+                    return [DeviceLogEntry.model_validate(entry) for entry in cached]
+                except ValidationError:
+                    pass
+            await redis_cache.delete(cache_key)
 
     try:
         async with LibreNMSClient() as client:
@@ -117,9 +130,10 @@ async def get_device_logs(
             detail="LibreNMS logs are currently unavailable",
         ) from exc
 
-    await redis_cache.set(
-        cache_key,
-        [entry.model_dump() for entry in entries],
-        ttl=DEVICE_LOG_CACHE_TTL,
-    )
+    if from_ is None and to is None:
+        await redis_cache.set(
+            cache_key,
+            [entry.model_dump() for entry in entries],
+            ttl=DEVICE_LOG_CACHE_TTL,
+        )
     return entries
