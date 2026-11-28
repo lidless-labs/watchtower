@@ -1,0 +1,1 @@
+{"data": [{"vmid": 101, "name": "app-vm", "status": "running", "cpu": 0.5, "cpus": 2, "mem": 1073741824, "maxmem": 2147483648, "uptime": 500, "netin": 1000, "netout": 2000}, {"vmid": 102, "name": "old-vm", "status": "stopped", "cpus": 1, "mem": 0, "maxmem": 1073741824}]}

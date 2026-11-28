@@ -1,0 +1,6 @@
+{
+  "alerts": [
+    {"id": 31, "device_id": 7, "rule_id": 4, "state": 1, "severity": "critical", "title": "Device down", "timestamp": "2026-01-01 00:00:00", "hostname": "switch-a.example.com"},
+    {"id": 32, "device_id": 8, "rule_id": 5, "state": 2, "severity": "warning", "title": "High use", "hostname": "server-b.example.com"}
+  ]
+}
