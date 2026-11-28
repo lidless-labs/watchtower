@@ -109,48 +109,62 @@ async def test_vm_listing_running_only_and_malformed_record(make_client):
 
 
 @pytest.mark.asyncio
-async def test_vm_node_timeout_is_skipped(monkeypatch):
+async def test_vm_node_timeout_is_skipped(monkeypatch, caplog):
     monkeypatch.setattr(proxmox, "_PROXMOX_NODE_FETCH_TIMEOUT", 0.001)
     client = ProxmoxClient("https://pve.example.com", "id", "secret")
 
     async def fake_get(endpoint, params=None):
         if endpoint == "/nodes":
             return {"data": [{"node": "pve-a", "status": "online"}]}
-        await asyncio.sleep(0.05)
+        if endpoint.endswith("/qemu"):
+            await asyncio.sleep(0.05)
+            return {"data": [{"vmid": 201, "name": "late-vm", "status": "running"}]}
         return {"data": []}
 
     client._get = fake_get
     assert await client.get_vms() == []
+    assert "Timed out fetching qemu data for Proxmox node pve-a" in caplog.text
 
 
 @pytest.mark.asyncio
-async def test_vm_node_http_error_is_skipped():
+async def test_vm_node_http_error_is_skipped(caplog):
     client = ProxmoxClient("https://pve.example.com", "id", "secret")
 
     async def fake_get(endpoint, params=None):
         if endpoint == "/nodes":
             return {"data": [{"node": "pve-a", "status": "online"}]}
+        if endpoint.endswith("/lxc"):
+            return {"data": [{"vmid": 202, "name": "sibling-vm", "status": "running"}]}
         request = httpx.Request("GET", "https://pve.example.com")
         raise httpx.HTTPStatusError("missing", request=request, response=httpx.Response(500, request=request))
 
     client._get = fake_get
-    assert await client.get_vms() == []
+    vms = await client.get_vms()
+    assert [(vm.vmid, vm.type) for vm in vms] == [(202, "lxc")]
+    assert "Failed to fetch qemu data for Proxmox node pve-a" in caplog.text
 
 
 @pytest.mark.asyncio
-async def test_vm_batch_timeout_cancels_pending_fetches(monkeypatch):
+async def test_vm_batch_timeout_cancels_pending_fetches(monkeypatch, caplog):
     monkeypatch.setattr(proxmox, "_PROXMOX_VM_BATCH_TIMEOUT", 0.001)
     monkeypatch.setattr(proxmox, "_PROXMOX_NODE_FETCH_TIMEOUT", 1)
     client = ProxmoxClient("https://pve.example.com", "id", "secret")
+    cancelled = []
 
     async def fake_get(endpoint, params=None):
         if endpoint == "/nodes":
             return {"data": [{"node": "pve-a", "status": "online"}]}
-        await asyncio.sleep(0.1)
-        return {"data": []}
+        try:
+            await asyncio.sleep(0.1)
+            return {"data": [{"vmid": 203, "name": "late-vm", "status": "running"}]}
+        except asyncio.CancelledError:
+            cancelled.append(endpoint)
+            raise
 
     client._get = fake_get
     assert await client.get_vms() == []
+    assert cancelled
+    assert "Timed out fetching Proxmox VM inventory after" in caplog.text
 
 
 @pytest.mark.asyncio

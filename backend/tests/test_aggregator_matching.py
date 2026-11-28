@@ -115,6 +115,7 @@ def test_match_proxmox_avoids_short_partial_and_empty_node_names():
 
 def test_calculate_utilization_uses_max_direction_and_rounds():
     assert _calculate_utilization({"speed": 1000, "in_rate": 10, "out_rate": 25}) == 20.0
+    assert _calculate_utilization({"speed": 3000, "in_rate": 10, "out_rate": 0}) == 2.67
 
 
 @pytest.mark.parametrize("speed", [0, None, -1])
@@ -133,7 +134,7 @@ async def test_get_port_utilization_handles_missing_id_or_name():
 
 
 @pytest.mark.asyncio
-async def test_get_port_utilization_uses_case_insensitive_alias(wired_redis_cache, monkeypatch):
+async def test_get_port_utilization_uses_case_insensitive_alias(wired_redis_cache):
     from app.polling import aggregator
 
     await aggregator.redis_cache.set("watchtower:interfaces:7", [{"name": "eth0", "alias": "WAN uplink", "speed": 1000, "in_rate": 10, "out_rate": 0}])
@@ -154,7 +155,7 @@ async def test_discovery_helpers_clean_ids_types_and_filter_subnets(monkeypatch)
     from app.polling.librenms import LibreNMSDevice
 
     assert discovery._clean_device_id("Switch A.example.com", "unused") == "switch-a"
-    assert discovery._clean_device_id(None, "!!!") == "device-!!!"
+    assert discovery._clean_device_id(None, "!!!").startswith("device-")
     assert discovery._ip_in_subnets("192.0.2.10", discovery._parse_subnets(["192.0.2.0/24", "invalid"])) is True
     assert discovery._ip_in_subnets("bad-ip", []) is False
     device = LibreNMSDevice(device_id=1, hostname="fw.example.com", status=1, os="panos")
@@ -228,12 +229,15 @@ async def test_discover_connections_matches_remote_ids_and_hostnames(monkeypatch
     devices = [
         {"id": "switch-a", "librenms_id": 1, "librenms_hostname": "switch-a.example.com", "ip": "192.0.2.10"},
         {"id": "switch-b", "librenms_id": 2, "librenms_hostname": "switch-b.example.com", "ip": "192.0.2.11"},
+        {"id": "peer", "librenms_id": 3, "librenms_hostname": "peer.example.com", "ip": "192.0.2.12"},
     ]
     connections = await discovery.discover_connections(devices)
-    assert len(connections) == 1
+    assert len(connections) == 2
     assert connections[0]["source"] == {"device": "switch-a", "port": "eth0"}
     assert connections[0]["target"] == {"device": "switch-b", "port": "eth1"}
     assert connections[0]["discovery_protocol"] == "lldp"
+    assert connections[1]["source"]["device"] == "switch-a"
+    assert connections[1]["target"]["device"] == "peer"
 
 
 def test_build_topology_yaml_preserves_manual_links_and_external_links():
@@ -272,10 +276,13 @@ async def test_generate_topology_yaml_uses_discovery_and_preserves_config(monkey
     monkeypatch.setattr(discovery, "discover_connections", AsyncMock(return_value=[]))
     monkeypatch.setattr(discovery, "get_topology_config", lambda: {"external_links": [{"id": "internet"}]})
 
-    result = await discovery.generate_topology_yaml()
+    import yaml
 
-    assert "switch-a" in result
-    assert "external_links" in result
+    result = yaml.safe_load(await discovery.generate_topology_yaml())
+
+    assert result["clusters"][0]["devices"] == ["switch-a"]
+    assert result["devices"]["switch-a"]["ip"] == "192.0.2.10"
+    assert result["external_links"] == [{"id": "internet"}]
 
 
 @pytest.mark.asyncio

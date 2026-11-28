@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from unittest.mock import AsyncMock
 
 import pytest
@@ -162,6 +163,8 @@ async def test_poll_device_status_caches_devices_and_changes(wired_redis_cache, 
 
 
 @pytest.mark.asyncio
-async def test_poll_interfaces_skips_missing_device_cache(wired_redis_cache):
+async def test_poll_interfaces_skips_missing_device_cache(wired_redis_cache, caplog):
+    caplog.set_level(logging.DEBUG, logger=scheduler.logger.name)
     await scheduler.poll_interfaces()
     assert await scheduler.redis_cache.get_json(scheduler.CACHE_DEVICES) is None
+    assert "No cached devices, skipping interface poll" in caplog.text
