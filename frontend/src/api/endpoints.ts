@@ -5,7 +5,7 @@
 import axios, { type AxiosRequestConfig } from 'axios'
 import { apiClient } from './client'
 import type { Topology, TopologySummary } from '../types/topology'
-import type { Device, DeviceSummary } from '../types/device'
+import type { Device, DeviceLogEntry, DeviceLogKind, DeviceSummary } from '../types/device'
 import type { AlertSummary, Alert } from '../types/alert'
 import type { L3Topology } from '../types/vlan'
 
@@ -153,6 +153,19 @@ export async function fetchDevices(): Promise<DeviceSummary[]> {
 
 export async function fetchDevice(deviceId: string): Promise<Device> {
   return fetchJson<Device>(`/api/device/${deviceId}`)
+}
+
+export async function fetchDeviceLogs(
+  deviceId: string,
+  kind: DeviceLogKind,
+  limit: number = 50,
+  signal?: AbortSignal,
+): Promise<DeviceLogEntry[]> {
+  const response = await apiClient.get<DeviceLogEntry[]>(
+    `/device/${encodeURIComponent(deviceId)}/logs`,
+    { params: { kind, limit }, signal },
+  )
+  return response.data
 }
 
 export async function fetchAlerts(status?: string): Promise<AlertSummary[]> {

@@ -7,12 +7,14 @@ API docs: https://docs.librenms.org/API/
 
 from __future__ import annotations
 
-import httpx
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import quote
+
+import httpx
 from pydantic import BaseModel
 
 from app.config import get_settings
+from app.models.device_log import DeviceLogEntry
 
 
 def _path_segment(value: int | str) -> str:
@@ -204,6 +206,43 @@ class LibreNMSClient:
     async def get_device_by_hostname(self, hostname: str) -> LibreNMSDevice | None:
         """Get device by hostname"""
         return await self.get_device(hostname)
+
+    async def get_device_logs(
+        self,
+        hostname: str,
+        kind: Literal["eventlog", "syslog", "alertlog"],
+        limit: int = 50,
+        start: int = 1,
+        from_: str | None = None,
+        to: str | None = None,
+    ) -> list[DeviceLogEntry]:
+        """Read a device's event, syslog, or alert log from LibreNMS."""
+        params: dict[str, int | str] = {"limit": limit, "start": start}
+        if from_ is not None:
+            params["from"] = from_
+        if to is not None:
+            params["to"] = to
+
+        data = await self._get(
+            f"/logs/{kind}/{_path_segment(hostname)}",
+            params=params,
+        )
+        if not isinstance(data, dict) or not isinstance(data.get("logs", []), list):
+            raise ValueError("LibreNMS returned an invalid log response")
+        return [
+            DeviceLogEntry(
+                timestamp=str(entry.get("datetime") or entry.get("timestamp") or ""),
+                type=entry.get("type"),
+                severity=(
+                    str(entry["severity"])
+                    if entry.get("severity") is not None
+                    else None
+                ),
+                message=str(entry.get("message") or ""),
+            )
+            for entry in data.get("logs", [])
+            if isinstance(entry, dict)
+        ]
 
     # ─────────────────────────────────────────────────────────────
     # Port/Interface endpoints
