@@ -19,39 +19,38 @@ def payload(name: str) -> dict:
 
 
 @pytest.fixture
-async def make_client():
-    clients = []
+def make_client(monkeypatch):
+    real_async_client = httpx.AsyncClient
 
     def factory(handler):
-        client = ProxmoxClient("https://pve.example.com", "user@pam!token", "fixture-secret")
-        client._client = httpx.AsyncClient(
-            base_url="https://pve.example.com/api2/json",
-            headers={"Authorization": "PVEAPIToken=user@pam!token=fixture-secret"},
-            transport=httpx.MockTransport(handler),
-        )
-        clients.append(client._client)
-        return client
+        def mock_transport_client(*args, **kwargs):
+            kwargs["transport"] = httpx.MockTransport(handler)
+            return real_async_client(*args, **kwargs)
 
-    yield factory
-    for client in clients:
-        await client.aclose()
+        monkeypatch.setattr(httpx, "AsyncClient", mock_transport_client)
+        return ProxmoxClient("https://pve.example.com", "user@pam!token", "fixture-secret")
+
+    return factory
 
 
 @pytest.mark.asyncio
 async def test_get_nodes_parses_fixture(make_client):
-    nodes = await make_client(lambda request: httpx.Response(200, json=payload("proxmox_nodes.json"))).get_nodes()
-    assert [(node.node, node.status) for node in nodes] == [("pve-a", "online"), ("pve-b", "offline")]
+    async with make_client(lambda request: httpx.Response(200, json=payload("proxmox_nodes.json"))) as client:
+        nodes = await client.get_nodes()
+        assert [(node.node, node.status) for node in nodes] == [("pve-a", "online"), ("pve-b", "offline")]
 
 
 @pytest.mark.asyncio
 async def test_get_nodes_empty_data(make_client):
-    assert await make_client(lambda request: httpx.Response(200, json={"data": []})).get_nodes() == []
+    async with make_client(lambda request: httpx.Response(200, json={"data": []})) as client:
+        assert await client.get_nodes() == []
 
 
 @pytest.mark.asyncio
 async def test_get_nodes_malformed_record_raises(make_client):
-    with pytest.raises(ValidationError):
-        await make_client(lambda request: httpx.Response(200, json={"data": [{"node": "bad"}]})).get_nodes()
+    async with make_client(lambda request: httpx.Response(200, json={"data": [{"node": "bad"}]})) as client:
+        with pytest.raises(ValidationError):
+            await client.get_nodes()
 
 
 @pytest.mark.asyncio
@@ -61,14 +60,15 @@ async def test_auth_header_and_api_path(make_client):
         assert request.headers["Authorization"].startswith("PVEAPIToken=")
         return httpx.Response(200, json={"data": []})
 
-    await make_client(handler).get_nodes()
+    async with make_client(handler) as client:
+        await client.get_nodes()
 
 
 @pytest.mark.asyncio
 async def test_node_statistics_and_percentages(make_client):
-    client = make_client(lambda request: httpx.Response(200, json={"data": {"cpu": 0.25, "maxcpu": 8, "mem": 1, "maxmem": 4}}))
-    node = await client.get_node("pve-a")
-    assert (node.node, node.status, node.cpu_percent, node.memory_percent) == ("pve-a", "online", 25.0, 25.0)
+    async with make_client(lambda request: httpx.Response(200, json={"data": {"cpu": 0.25, "maxcpu": 8, "mem": 1, "maxmem": 4}})) as client:
+        node = await client.get_node("pve-a")
+        assert (node.node, node.status, node.cpu_percent, node.memory_percent) == ("pve-a", "online", 25.0, 25.0)
 
 
 @pytest.mark.asyncio
@@ -77,7 +77,8 @@ async def test_get_node_encodes_path_and_http_error_returns_none(make_client):
         assert request.url.raw_path.endswith(b"/nodes/pve%2Fa/status")
         return httpx.Response(404)
 
-    assert await make_client(handler).get_node("pve/a") is None
+    async with make_client(handler) as client:
+        assert await client.get_node("pve/a") is None
 
 
 @pytest.mark.asyncio
@@ -90,22 +91,25 @@ async def test_vm_listing_skips_offline_nodes_and_adds_type(make_client):
         assert "/pve-a/lxc" in request.url.path
         return httpx.Response(200, json={"data": []})
 
-    vms = await make_client(handler).get_vms()
-    assert len(vms) == 2
-    assert all(vm.node == "pve-a" and vm.type == "qemu" for vm in vms)
+    async with make_client(handler) as client:
+        vms = await client.get_vms()
+        assert len(vms) == 2
+        assert all(vm.node == "pve-a" and vm.type == "qemu" for vm in vms)
 
 
 @pytest.mark.asyncio
-async def test_vm_listing_running_only_and_malformed_record(make_client):
+async def test_vm_listing_running_only_and_malformed_record(make_client, caplog):
     def handler(request):
         if request.url.path.endswith("/nodes"):
             return httpx.Response(200, json={"data": [{"node": "pve-a", "status": "online"}]})
         if request.url.path.endswith("/qemu"):
-            return httpx.Response(200, json={"data": [{"vmid": 1, "name": "missing-status"}, *payload("proxmox_vms.json")["data"]]})
+            return httpx.Response(200, json={"data": [{"vmid": "not-an-int", "name": "invalid-vmid", "status": "running"}, *payload("proxmox_vms.json")["data"]]})
         return httpx.Response(200, json={"data": []})
 
-    vms = await make_client(handler).get_vms(running_only=True)
-    assert [vm.vmid for vm in vms] == [101]
+    async with make_client(handler) as client:
+        vms = await client.get_vms(running_only=True)
+        assert [vm.vmid for vm in vms] == [101]
+    assert "Skipping invalid Proxmox VM record" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -174,27 +178,32 @@ async def test_get_node_vms_combines_types_and_filters_running(make_client):
             return httpx.Response(200, json={"data": [payload("proxmox_vms.json")["data"][0]]})
         return httpx.Response(200, json={"data": [dict(payload("proxmox_vms.json")["data"][1], vmid=103)]})
 
-    vms = await make_client(handler).get_node_vms("pve-a", running_only=True)
-    assert [(vm.vmid, vm.type) for vm in vms] == [(101, "qemu")]
+    async with make_client(handler) as client:
+        vms = await client.get_node_vms("pve-a", running_only=True)
+        assert [(vm.vmid, vm.type) for vm in vms] == [(101, "qemu")]
 
 
 @pytest.mark.asyncio
 async def test_get_node_vms_http_errors_are_tolerated(make_client):
-    assert await make_client(lambda request: httpx.Response(500)).get_node_vms("pve-a") == []
+    async with make_client(lambda request: httpx.Response(500)) as client:
+        assert await client.get_node_vms("pve-a") == []
 
 
 @pytest.mark.asyncio
 async def test_storage_parses_defaults_and_handles_http_error(make_client):
-    client = make_client(lambda request: httpx.Response(200, json={"data": [{"storage": "local", "used": 2}]}))
-    storage = await client.get_node_storage("pve-a")
-    assert storage[0]["storage"] == "local" and storage[0]["enabled"] == 1
-    assert await make_client(lambda request: httpx.Response(404)).get_node_storage("pve-a") == []
+    async with make_client(lambda request: httpx.Response(200, json={"data": [{"storage": "local", "used": 2}]})) as client:
+        storage = await client.get_node_storage("pve-a")
+        assert storage[0]["storage"] == "local" and storage[0]["enabled"] == 1
+    async with make_client(lambda request: httpx.Response(404)) as client:
+        assert await client.get_node_storage("pve-a") == []
 
 
 @pytest.mark.asyncio
 async def test_health_check_success_and_failure(make_client):
-    assert await make_client(lambda request: httpx.Response(200, json={"data": "ok"})).health_check() is True
-    assert await make_client(lambda request: httpx.Response(500)).health_check() is False
+    async with make_client(lambda request: httpx.Response(200, json={"data": "ok"})) as client:
+        assert await client.health_check() is True
+    async with make_client(lambda request: httpx.Response(500)) as client:
+        assert await client.health_check() is False
 
 
 def test_node_and_vm_zero_memory_are_safe():

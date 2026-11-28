@@ -149,8 +149,7 @@ async def test_get_port_utilization_returns_zero_for_uncached_port(monkeypatch):
     assert await _get_port_utilization(7, "eth0") == 0
 
 
-@pytest.mark.asyncio
-async def test_discovery_helpers_clean_ids_types_and_filter_subnets(monkeypatch):
+def test_discovery_helpers_clean_ids_types_and_filter_subnets():
     from app.discovery import librenms_sync as discovery
     from app.polling.librenms import LibreNMSDevice
 
@@ -210,7 +209,7 @@ async def test_discover_connections_matches_remote_ids_and_hostnames(monkeypatch
     links = [
         LibreNMSLink(local_device_id=1, local_port="eth0", remote_device_id=2, remote_port="eth1", protocol="lldp"),
         LibreNMSLink(local_device_id=2, local_port="eth1", remote_device_id=1, remote_port="eth0", protocol="lldp"),
-        LibreNMSLink(local_device_id=1, local_port_id=3, remote_hostname="peer.example.com"),
+        LibreNMSLink(local_device_id=1, local_port_id=3, remote_hostname="peer.other.example.com"),
         LibreNMSLink(local_device_id=1, remote_hostname="missing.example.com"),
         LibreNMSLink(local_device_id=99, remote_device_id=2),
     ]
