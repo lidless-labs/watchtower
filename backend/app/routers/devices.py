@@ -79,12 +79,14 @@ async def get_device_logs(
     if device.librenms_device_id is None:
         raise HTTPException(status_code=502, detail="Device is not available in LibreNMS")
 
-    librenms_devices = await redis_cache.get_json(CACHE_DEVICES) or []
+    cached_devices = await redis_cache.get_json(CACHE_DEVICES)
+    librenms_devices = cached_devices if isinstance(cached_devices, list) else []
     librenms_device = next(
         (
             item
             for item in librenms_devices
-            if str(item.get("device_id")) == str(device.librenms_device_id)
+            if isinstance(item, dict)
+            and str(item.get("device_id")) == str(device.librenms_device_id)
         ),
         None,
     )

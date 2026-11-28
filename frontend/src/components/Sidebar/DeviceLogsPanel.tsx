@@ -16,19 +16,6 @@ export function DeviceLogMessage({ message }: { message: string }) {
   return <span className="whitespace-pre-wrap break-words">{message}</span>
 }
 
-export function formatSeverity(severity?: string | null): string | null {
-  if (!severity) return null
-  const labels: Record<string, string> = {
-    '1': 'Ok',
-    '2': 'Info',
-    '3': 'Notice',
-    '4': 'Warning',
-    '5': 'Error',
-    '6': 'Critical',
-  }
-  return labels[severity] ?? severity
-}
-
 export function selectDeviceLogKind(
   value: string,
   onChange: (kind: DeviceLogKind) => void,
@@ -74,7 +61,7 @@ export function DeviceLogsEntries({
           <div className="mb-1 flex flex-wrap items-center justify-between gap-x-2 text-[10px] text-text-muted">
             <span>{entry.timestamp}</span>
             <span className="uppercase tracking-wide">
-              {[entry.type, formatSeverity(entry.severity)]
+              {[entry.type, entry.severity]
                 .filter(Boolean)
                 .join(' · ') || 'Log entry'}
             </span>
@@ -118,6 +105,8 @@ export default function DeviceLogsPanel({ deviceId }: DeviceLogsPanelProps) {
   const [error, setError] = useState(false)
 
   useEffect(() => {
+    setEntries([])
+    setError(false)
     if (!expanded) return
 
     const controller = new AbortController()

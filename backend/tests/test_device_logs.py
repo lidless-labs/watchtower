@@ -62,35 +62,38 @@ async def _unknown_device(_device_id: str):
 
 
 async def test_librenms_client_normalizes_each_log_kind(monkeypatch):
+    event_labels = ["Unknown", "Ok", "Info", "Notice", "Warning", "Error", "Critical"]
+    syslog_labels = ["Emergency", "Alert", "Critical", "Error", "Warning", "Notice", "Info", "Debug"]
+    alert_labels = ["Ok", "Error", "Info", "Warning", "Notice", "Warning", "Ok"]
+    alert_states = ["clear", "alert", "ack", "worse", "better", "changed", "recovered"]
     fixtures = {
-        "eventlog": {
-            "datetime": "2026-11-28 12:34:56",
-            "type": "interface",
-            "severity": "3",
-            "message": "Ethernet1/1 changed state to down",
-        },
-        "syslog": {
-            "timestamp": "2026-11-28 12:35:10",
-            "program": "LINK-STATE",
-            "msg": "Ethernet1/1 changed state to up",
-            "level": "5",
-            "priority": "189",
-            "facility": "local7",
-            "tag": "router",
-        },
-        "alertlog": {
-            "time_logged": "2026-11-28 12:36:22",
-            "state": 1,
-            "details": "CPU threshold exceeded",
-            "rule_id": 42,
-        },
+        "eventlog": [
+            {"datetime": f"2026-11-28 12:34:{index:02}", "type": "interface", "severity": index, "message": "Ethernet1/1 changed state"}
+            for index in range(7)
+        ],
+        "syslog": [
+            {"timestamp": "2026-11-28 12:35:10", "program": "LINK-STATE", "msg": "Ethernet1/1 changed state", "level": index, "priority": 189}
+            for index in range(8)
+        ] + [
+            {"timestamp": "2026-11-28 12:35:11", "program": "LINK-STATE", "msg": "Link notice", "level": label}
+            for label in ("EMERG", "Alert", "crit", "ERR", "warn", "WARNING", "Notice", "info", "Debug")
+        ] + [
+            {"timestamp": "2026-11-28 12:35:12", "program": "LINK-STATE", "msg": "Fallback priority", "priority": 189}
+        ],
+        "alertlog": [
+            {"time_logged": f"2026-11-28 12:36:{state:02}", "state": state, "details": [], "rule_id": 42}
+            for state in range(7)
+        ] + [
+            {"time_logged": f"2026-11-28 12:37:{state:02}", "state": state, "details": {"rule": [{"name": "High CPU", "entities": ["cpu0", "cpu1"]}]}, "rule_id": 42}
+            for state in range(7)
+        ],
     }
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
         kind = request.url.path.split("/")[4]
-        return httpx.Response(200, json={"status": "ok", "logs": [fixtures[kind]]})
+        return httpx.Response(200, json={"status": "ok", "logs": fixtures[kind]})
 
     _mock_librenms(monkeypatch, handler)
     async with LibreNMSClient() as client:
@@ -99,24 +102,19 @@ async def test_librenms_client_normalizes_each_log_kind(monkeypatch):
             for kind in fixtures
         }
 
-    assert normalized["eventlog"][0].model_dump() == {
-        "timestamp": "2026-11-28 12:34:56",
-        "type": "interface",
-        "severity": "3",
-        "message": "Ethernet1/1 changed state to down",
-    }
-    assert normalized["syslog"][0].model_dump() == {
-        "timestamp": "2026-11-28 12:35:10",
-        "type": "LINK-STATE",
-        "severity": "5",
-        "message": "Ethernet1/1 changed state to up",
-    }
-    assert normalized["alertlog"][0].model_dump() == {
-        "timestamp": "2026-11-28 12:36:22",
-        "type": None,
-        "severity": "1",
-        "message": "Rule 42: alert - CPU threshold exceeded",
-    }
+    assert [entry.severity for entry in normalized["eventlog"]] == event_labels
+    assert [entry.severity for entry in normalized["syslog"]] == syslog_labels + [
+        "Emergency", "Alert", "Critical", "Error", "Warning", "Warning", "Notice", "Info", "Debug", "Notice"
+    ]
+    assert [entry.severity for entry in normalized["alertlog"]] == alert_labels * 2
+    assert [entry.message for entry in normalized["alertlog"][:7]] == [
+        f"Rule 42: {state}" for state in alert_states
+    ]
+    assert [entry.message for entry in normalized["alertlog"][7:]] == [
+        f"Rule 42: {state} - High CPU (2 entities)" for state in alert_states
+    ]
+    assert normalized["eventlog"][0].timestamp == "2026-11-28 12:34:00"
+    assert normalized["syslog"][0].type == "LINK-STATE"
     assert len(requests) == 3
     assert all(request.method == "GET" for request in requests)
 
@@ -164,7 +162,7 @@ async def test_device_logs_use_descending_order_and_cache_results(
         {
             "timestamp": "2026-11-28 12:34:56",
             "type": "LINK-STATE",
-            "severity": "5",
+            "severity": "Notice",
             "message": "Ethernet1/1 changed state to down",
         }
     ]
@@ -284,6 +282,13 @@ async def test_device_logs_reject_invalid_kind(wired_redis_cache):
         )
 
     assert response.status_code == 422
+
+
+async def test_device_logs_require_authentication(wired_redis_cache):
+    async with AsyncClient(transport=ASGITransport(app=_app()), base_url="http://test") as client:
+        response = await client.get("/api/device/fixture-router/logs")
+
+    assert response.status_code == 401
 
 
 async def test_device_logs_return_404_for_unknown_device(wired_redis_cache, monkeypatch):

@@ -6,7 +6,6 @@ import {
   DeviceLogMessage,
   DeviceLogSourceSelector,
   DeviceLogsEntries,
-  formatSeverity,
   requestDeviceLogs,
   selectDeviceLogKind,
 } from './DeviceLogsPanel'
@@ -18,7 +17,7 @@ vi.mock('../../api/endpoints', () => ({
 const entry: DeviceLogEntry = {
   timestamp: '2026-11-28 12:34:56',
   type: 'syslog',
-  severity: '5',
+  severity: 'Error',
   message: 'Interface state changed',
 }
 
@@ -66,12 +65,6 @@ describe('DeviceLogsPanel', () => {
       50,
       expect.any(AbortSignal),
     )
-  })
-
-  it('maps LibreNMS severities to labels', () => {
-    expect(['1', '2', '3', '4', '5', '6'].map(formatSeverity)).toEqual([
-      'Ok', 'Info', 'Notice', 'Warning', 'Error', 'Critical',
-    ])
   })
 
   it('renders device supplied markup as escaped text', () => {
