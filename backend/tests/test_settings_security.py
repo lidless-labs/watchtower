@@ -1,3 +1,5 @@
+# content-guard: allow infrastructure/private-hostname file
+# content-guard: allow infrastructure/private-ipv4 file
 """Security checks for settings connection-test helpers."""
 
 from __future__ import annotations

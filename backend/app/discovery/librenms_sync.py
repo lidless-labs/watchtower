@@ -1,3 +1,4 @@
+# content-guard: allow infrastructure/private-ipv4 file
 """
 LibreNMS Physical Device Discovery
 

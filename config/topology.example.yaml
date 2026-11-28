@@ -1,3 +1,4 @@
+# content-guard: allow infrastructure/private-ipv4 file
 # Watchtower Topology Configuration
 # Copy this file to topology.yaml and customize for your network
 #

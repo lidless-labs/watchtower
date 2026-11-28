@@ -1,3 +1,4 @@
+# content-guard: allow infrastructure/private-ipv4 file
 """Regression tests for safe API path segment construction."""
 
 from __future__ import annotations
