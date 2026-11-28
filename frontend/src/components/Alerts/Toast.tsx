@@ -1,10 +1,11 @@
+import { useState } from 'react'
 import type { Toast as ToastType } from '../../types/alert'
 import StatusDot from '../common/StatusDot'
 
 interface ToastProps {
   toast: ToastType
   onDismiss: (id: string) => void
-  onAcknowledge: (alertId: string) => void
+  onAcknowledge: (alertId: string) => Promise<void>
 }
 
 const severityStyles = {
@@ -50,6 +51,20 @@ function formatTimeAgo(timestamp: string): string {
 
 export default function Toast({ toast, onDismiss, onAcknowledge }: ToastProps) {
   const { alert } = toast
+  const [acknowledging, setAcknowledging] = useState(false)
+  const [acknowledgementError, setAcknowledgementError] = useState('')
+
+  const handleAcknowledge = async () => {
+    setAcknowledging(true)
+    setAcknowledgementError('')
+    try {
+      await onAcknowledge(alert.id)
+    } catch {
+      setAcknowledgementError('Failed to acknowledge alert. Please try again.')
+    } finally {
+      setAcknowledging(false)
+    }
+  }
 
   return (
     <div
@@ -82,10 +97,11 @@ export default function Toast({ toast, onDismiss, onAcknowledge }: ToastProps) {
             <div className="flex items-center gap-2">
               {alert.status === 'active' && alert.severity === 'critical' && (
                 <button
-                  onClick={() => onAcknowledge(alert.id)}
+                  onClick={() => void handleAcknowledge()}
+                  disabled={acknowledging}
                   className="text-xs px-2 py-1 bg-bg-tertiary hover:bg-border-default rounded transition-colors"
                 >
-                  Acknowledge
+                  {acknowledging ? 'Acknowledging…' : 'Acknowledge'}
                 </button>
               )}
               <button
@@ -96,6 +112,11 @@ export default function Toast({ toast, onDismiss, onAcknowledge }: ToastProps) {
               </button>
             </div>
           </div>
+          {acknowledgementError && (
+            <p className="mt-2 text-xs text-status-red" role="alert">
+              {acknowledgementError}
+            </p>
+          )}
         </div>
       </div>
     </div>

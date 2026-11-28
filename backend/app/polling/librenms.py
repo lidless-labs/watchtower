@@ -22,6 +22,40 @@ def _path_segment(value: int | str) -> str:
 class LibreNMSAPIError(RuntimeError):
     """LibreNMS returned a response that indicates a rejected operation."""
 
+    def __init__(self, message: str, status_code: int | None = None):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+def _raise_for_mutation_response(response: httpx.Response, action: str) -> None:
+    try:
+        response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = None
+        message = payload.get("message") if isinstance(payload, dict) else None
+        raise LibreNMSAPIError(
+            str(message or f"LibreNMS rejected the {action}"),
+            status_code=response.status_code,
+        ) from exc
+
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise LibreNMSAPIError(
+            f"LibreNMS returned an invalid response while trying to {action}",
+            status_code=response.status_code,
+        ) from exc
+
+    if not isinstance(payload, dict) or payload.get("status") != "ok":
+        message = payload.get("message") if isinstance(payload, dict) else None
+        raise LibreNMSAPIError(
+            str(message or f"LibreNMS rejected the {action}"),
+            status_code=response.status_code,
+        )
+
 
 class LibreNMSDevice(BaseModel):
     """Device data from LibreNMS API"""
@@ -226,9 +260,8 @@ class LibreNMSClient:
 
     async def get_active_alerts(self) -> list[LibreNMSAlert]:
         """Get active and acknowledged alerts."""
-        active_alerts = await self.get_alerts(state="alert")
-        acknowledged_alerts = await self.get_alerts(state="ack")
-        return active_alerts + acknowledged_alerts
+        data = await self._get("/alerts", params={"state": "1,2"})
+        return [LibreNMSAlert(**alert) for alert in data.get("alerts", [])]
 
     async def acknowledge_alert(
         self,
@@ -240,29 +273,22 @@ class LibreNMSClient:
         if not self._client:
             raise RuntimeError("Client not initialized. Use 'async with' context manager.")
 
-        payload: dict[str, Any] = {"until_clear": until_clear}
-        if note is not None:
-            payload["note"] = note
-
         response = await self._client.put(
             f"/alerts/{_path_segment(alert_id)}",
-            json=payload,
+            json={"note": note or "", "until_clear": until_clear},
         )
-        response.raise_for_status()
-        data = response.json()
-        if not isinstance(data, dict) or data.get("status") != "ok":
-            raise LibreNMSAPIError("LibreNMS rejected the alert acknowledgement")
+        _raise_for_mutation_response(response, "alert acknowledgement")
 
     async def unmute_alert(self, alert_id: int | str) -> None:
         """Unmute an alert in LibreNMS."""
         if not self._client:
             raise RuntimeError("Client not initialized. Use 'async with' context manager.")
 
-        response = await self._client.put(f"/alerts/unmute/{_path_segment(alert_id)}")
-        response.raise_for_status()
-        data = response.json()
-        if not isinstance(data, dict) or data.get("status") != "ok":
-            raise LibreNMSAPIError("LibreNMS rejected the alert unmute request")
+        response = await self._client.put(
+            f"/alerts/unmute/{_path_segment(alert_id)}",
+            json={},
+        )
+        _raise_for_mutation_response(response, "alert unmute request")
 
     # ─────────────────────────────────────────────────────────────
     # Link/Neighbor endpoints (CDP/LLDP discovery)

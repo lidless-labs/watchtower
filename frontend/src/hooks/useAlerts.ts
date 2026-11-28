@@ -5,6 +5,20 @@ import { fetchAlerts, acknowledgeAlert as apiAcknowledgeAlert } from '../api/end
 import type { Alert } from '../types/alert'
 import { usePollingInterval } from './usePollingInterval'
 
+export async function acknowledgeAlertRequest(
+  alertId: string,
+  sendAcknowledgement: (id: string) => Promise<void>,
+  acknowledgeInStore: (id: string) => void
+): Promise<void> {
+  try {
+    await sendAcknowledgement(alertId)
+    acknowledgeInStore(alertId)
+  } catch (err) {
+    console.error('Failed to acknowledge alert:', err)
+    throw err
+  }
+}
+
 export function useAlerts() {
   const alerts = useAlertStore((state) => state.alerts)
   const toasts = useAlertStore((state) => state.toasts)
@@ -67,14 +81,8 @@ export function useAlerts() {
   }, [toasts, warningAutoDismiss, dismissToast])
 
   const acknowledgeAlert = useCallback(
-    async (alertId: string) => {
-      try {
-        await apiAcknowledgeAlert(alertId)
-        acknowledgeAlertAction(alertId)
-      } catch (err) {
-        console.error('Failed to acknowledge alert:', err)
-      }
-    },
+    (alertId: string) =>
+      acknowledgeAlertRequest(alertId, apiAcknowledgeAlert, acknowledgeAlertAction),
     [acknowledgeAlertAction]
   )
 
