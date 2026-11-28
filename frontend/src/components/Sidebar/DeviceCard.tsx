@@ -4,6 +4,7 @@ import UtilizationBar from '../common/UtilizationBar'
 import { PortGrid } from './PortGrid'
 import ProxmoxPanel from './ProxmoxPanel'
 import DeviceHistoryPanel from '../History/DeviceHistoryPanel'
+import DeviceLogsPanel from './DeviceLogsPanel'
 import { useNocStore } from '../../store/nocStore'
 
 interface DeviceCardProps {
@@ -164,6 +165,8 @@ export default function DeviceCard({ device }: DeviceCardProps) {
       <div className="space-y-3 mb-4 pb-4 border-b border-border-default">
         <DeviceHistoryPanel deviceId={device.id} />
       </div>
+
+      <DeviceLogsPanel deviceId={device.id} />
 
       {/* Interfaces preview */}
       {device.interfaces.length > 0 && (

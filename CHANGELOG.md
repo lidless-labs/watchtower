@@ -14,5 +14,6 @@ and this project aims to adhere to [Semantic Versioning](https://semver.org/spec
 
 ### Added
 
+- Read-only per-device LibreNMS event, syslog, and alert logs in the device detail panel (#53).
 - Maintainer-health docs: `SECURITY.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, this changelog, GitHub issue forms, and a pull-request template.
 - Rewrote `README.md` to lead with what Watchtower is (a self-hosted NOC dashboard), why it exists, and how it differs from the raw LibreNMS UI and Grafana. Added a verified copy-paste quickstart, a capability table, status and version badges, and a website link.

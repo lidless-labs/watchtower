@@ -25,6 +25,7 @@ import StatusDot from '../components/common/StatusDot'
 import ProxmoxPanel from '../components/Sidebar/ProxmoxPanel'
 import { PortGrid } from '../components/Sidebar/PortGrid'
 import DeviceCard from '../components/Sidebar/DeviceCard'
+import DeviceLogsPanel from '../components/Sidebar/DeviceLogsPanel'
 
 interface ClusterDetailPageProps {
   clusterId: string
@@ -278,6 +279,9 @@ function ClusterContent({
               )}
             </div>
             <ProxmoxPanel nodeName={device.display_name} />
+            <div className="mt-4">
+              <DeviceLogsPanel deviceId={device.id} />
+            </div>
           </section>
         ))}
       </div>
@@ -322,6 +326,9 @@ function ClusterContent({
             ) : (
               <div className="text-sm text-text-muted">No port data available.</div>
             )}
+            <div className="mt-4">
+              <DeviceLogsPanel deviceId={device.id} />
+            </div>
           </section>
         ))}
       </div>
@@ -379,6 +386,9 @@ function ClusterContent({
                   </div>
                 </div>
               )}
+            </div>
+            <div className="mt-4 w-full">
+              <DeviceLogsPanel deviceId={device.id} />
             </div>
           </section>
         ))}

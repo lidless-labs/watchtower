@@ -7,12 +7,14 @@ API docs: https://docs.librenms.org/API/
 
 from __future__ import annotations
 
-import httpx
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import quote
+
+import httpx
 from pydantic import BaseModel
 
 from app.config import get_settings
+from app.models.device_log import DeviceLogEntry
 
 
 def _path_segment(value: int | str) -> str:
@@ -204,6 +206,126 @@ class LibreNMSClient:
     async def get_device_by_hostname(self, hostname: str) -> LibreNMSDevice | None:
         """Get device by hostname"""
         return await self.get_device(hostname)
+
+    async def get_device_logs(
+        self,
+        hostname: str,
+        kind: Literal["eventlog", "syslog", "alertlog"],
+        limit: int = 50,
+        start: int = 0,
+        from_: str | None = None,
+        to: str | None = None,
+    ) -> list[DeviceLogEntry]:
+        """Read a device's event, syslog, or alert log from LibreNMS."""
+        params: dict[str, int | str] = {
+            "limit": limit,
+            "start": start,
+            "sortorder": "DESC",
+        }
+        if from_ is not None:
+            params["from"] = from_
+        if to is not None:
+            params["to"] = to
+
+        data = await self._get(
+            f"/logs/{kind}/{_path_segment(hostname)}",
+            params=params,
+        )
+        if not isinstance(data, dict) or not isinstance(data.get("logs", []), list):
+            raise ValueError("LibreNMS returned an invalid log response")
+        normalized: list[DeviceLogEntry] = []
+        eventlog_severities = ("Unknown", "Ok", "Info", "Notice", "Warning", "Error", "Critical")
+        syslog_severities = ("Emergency", "Alert", "Critical", "Error", "Warning", "Notice", "Info", "Debug")
+        alert_states = ("clear", "alert", "ack", "worse", "better", "changed", "recovered")
+        alert_severities = ("Ok", "Error", "Info", "Warning", "Notice", "Warning", "Ok")
+        syslog_text_severities = {
+            "emerg": "Emergency", "alert": "Alert", "crit": "Critical", "err": "Error",
+            "warn": "Warning", "warning": "Warning", "notice": "Notice", "info": "Info", "debug": "Debug",
+        }
+
+        def numeric(value: object) -> int | None:
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return None
+
+        def alert_details_summary(details: object) -> str:
+            if isinstance(details, str):
+                return details.strip()
+            if isinstance(details, list):
+                return ""
+            if not isinstance(details, dict):
+                return ""
+            rules = details.get("rule")
+            if not isinstance(rules, list):
+                rules = [rules] if rules else []
+            summaries: list[str] = []
+            for rule in rules:
+                if isinstance(rule, str):
+                    name = rule.strip()
+                    count = None
+                elif isinstance(rule, dict):
+                    name = str(rule.get("name") or rule.get("rule_name") or "").strip()
+                    entities = next(
+                        (rule[key] for key in ("entities", "entity", "devices", "ports") if key in rule),
+                        None,
+                    )
+                    count = len(entities) if isinstance(entities, (list, tuple, set)) else (1 if entities else None)
+                else:
+                    continue
+                if name and count is not None:
+                    summaries.append(f"{name} ({count} {'entity' if count == 1 else 'entities'})")
+                elif name:
+                    summaries.append(name)
+            return ", ".join(summaries)
+
+        for entry in data.get("logs", []):
+            if not isinstance(entry, dict):
+                continue
+
+            timestamp = (
+                entry.get("datetime")
+                or entry.get("timestamp")
+                or entry.get("time_logged")
+                or ""
+            )
+            state = numeric(entry.get("state"))
+            if kind == "eventlog":
+                value = numeric(entry.get("severity"))
+                severity = eventlog_severities[value] if value is not None and 0 <= value < len(eventlog_severities) else "Unknown"
+            elif kind == "syslog":
+                raw_level = entry.get("level")
+                if raw_level in (None, ""):
+                    raw_level = entry.get("priority")
+                text_level = str(raw_level).strip().casefold() if raw_level is not None else ""
+                value = numeric(raw_level)
+                if value is not None:
+                    value = value % 8
+                    severity = syslog_severities[value]
+                else:
+                    severity = syslog_text_severities.get(text_level, "Unknown")
+            else:
+                severity = alert_severities[state] if state is not None and 0 <= state < len(alert_severities) else "Unknown"
+            message = entry.get("message") or entry.get("msg")
+
+            if kind == "alertlog" and not message:
+                state_label = alert_states[state] if state is not None and 0 <= state < len(alert_states) else "unknown"
+                rule_id = entry.get("rule_id")
+                message = f"Rule {rule_id}: {state_label}" if rule_id is not None else state_label
+                details = alert_details_summary(entry.get("details"))
+                if details:
+                    message = f"{message} - {details}"
+
+            normalized.append(
+                DeviceLogEntry(
+                    timestamp=str(timestamp),
+                    type=entry.get("type") or entry.get("program"),
+                    severity=severity,
+                    message=str(message or ""),
+                )
+            )
+
+        return normalized
 
     # ─────────────────────────────────────────────────────────────
     # Port/Interface endpoints

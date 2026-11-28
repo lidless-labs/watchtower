@@ -1,6 +1,15 @@
 export type DeviceStatus = 'up' | 'down' | 'degraded' | 'unknown'
 export type DeviceType = 'switch' | 'firewall' | 'server' | 'router' | 'access_point' | 'other'
 
+export type DeviceLogKind = 'eventlog' | 'syslog' | 'alertlog'
+
+export interface DeviceLogEntry {
+  timestamp: string
+  type?: string | null
+  severity?: string | null
+  message: string
+}
+
 export interface Interface {
   name: string
   status: DeviceStatus
