@@ -60,6 +60,7 @@ export default function CriticalOverlay() {
     setAcknowledgementError('')
     try {
       await acknowledgeAlert(criticalOverlay.id)
+      setAcknowledgementError('')
       clearCriticalOverlay()
     } catch {
       setAcknowledgementError('Failed to acknowledge alert. Please try again.')

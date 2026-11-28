@@ -150,6 +150,33 @@ async def test_resolving_librenms_alert_unmutes_it(wired_redis_cache, monkeypatc
     assert json.loads(requests[0].read()) == {}
 
 
+async def test_resolving_librenms_alert_clears_cached_acknowledgement(wired_redis_cache, monkeypatch):
+    await redis_cache.set(CACHE_ALERTS, [{"id": 17, "state": 2, "hostname": "fixture-node"}])
+    await redis_cache.sadd(CACHE_ALERT_ACK_OVERLAY, "17")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"status": "ok"})
+
+    _mock_librenms(monkeypatch, handler)
+    async with AsyncClient(transport=ASGITransport(app=_app()), base_url="http://test") as client:
+        response = await client.post("/api/alert/librenms-17/resolve", headers=_headers())
+
+    assert response.status_code == 200
+    assert await redis_cache.smembers(CACHE_ALERT_ACK_OVERLAY) == set()
+    assert (await redis_cache.get_json(CACHE_ALERTS))[0]["state"] == 1
+
+
+async def test_resolving_missing_librenms_alert_returns_not_found(wired_redis_cache, monkeypatch):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"status": "error", "message": "No Alert by that ID"})
+
+    _mock_librenms(monkeypatch, handler)
+    async with AsyncClient(transport=ASGITransport(app=_app()), base_url="http://test") as client:
+        response = await client.post("/api/alert/librenms-17/resolve", headers=_headers())
+
+    assert response.status_code == 404
+
+
 async def test_librenms_acknowledged_alert_is_listed_as_acknowledged(wired_redis_cache, monkeypatch):
     await redis_cache.set(CACHE_ALERTS, [{"id": 17, "state": 2, "hostname": "fixture-node"}])
     monkeypatch.setattr(
@@ -177,13 +204,15 @@ async def test_local_acknowledgement_persists_in_redis(wired_redis_cache, monkey
     monkeypatch.setattr(alerts_module, "get_aggregated_topology", _down_topology)
     monkeypatch.setattr(alerts_module, "_notify_new_alerts", _skip_notifications)
     async with AsyncClient(transport=ASGITransport(app=_app()), base_url="http://test") as client:
-        response = await client.post("/api/alert/device-down-fixture-node/acknowledge", headers=_headers())
-        alerts_response = await client.get("/api/alerts")
+        initial_alerts_response = await client.get("/api/alerts")
+        response = await client.post("/api/alert/device-down-7/acknowledge", headers=_headers())
         acknowledged = await redis_cache.smembers(alerts_module.CACHE_ACKNOWLEDGED_ALERTS)
-        resolve_response = await client.post("/api/alert/device-down-fixture-node/resolve", headers=_headers())
+        alerts_response = await client.get("/api/alerts")
+        resolve_response = await client.post("/api/alert/device-down-7/resolve", headers=_headers())
 
     assert response.status_code == 200
-    assert acknowledged == {"device-down-fixture-node"}
+    assert initial_alerts_response.json()[0]["id"] == "device-down-7"
+    assert acknowledged == {"device-down-7"}
     assert alerts_response.status_code == 200
     assert alerts_response.json()[0]["status"] == AlertStatus.ACKNOWLEDGED.value
     assert resolve_response.status_code == 200
@@ -196,6 +225,7 @@ async def _down_topology():
         display_name="fixture-node",
         ip="192.0.2.10",
         last_seen=None,
+        librenms_device_id=7,
     )
     return SimpleNamespace(devices={"fixture-node": device})
 
@@ -310,6 +340,50 @@ async def test_successful_device_poll_clears_ack_for_recovered_device(
     await poll_device_status()
 
     assert await redis_cache.smembers(CACHE_ACKNOWLEDGED_ALERTS) == set()
+
+
+async def test_first_poll_does_not_broadcast_pre_acknowledged_alert(wired_redis_cache, monkeypatch):
+    new_alert_broadcasts = []
+    active_history_writes = []
+
+    async def broadcast_new_alerts(alerts):
+        new_alert_broadcasts.extend(alerts)
+
+    async def write_alert_events(alerts, state):
+        if state == "active":
+            active_history_writes.extend(alerts)
+
+    monkeypatch.setattr(scheduler_module, "broadcast_new_alerts", broadcast_new_alerts)
+    monkeypatch.setattr(scheduler_module.history_writer, "write_alert_events", write_alert_events)
+    monkeypatch.setattr(
+        scheduler_module,
+        "_fire_and_forget_history",
+        lambda coro, operation: asyncio.create_task(coro),
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "alerts": [
+                    {
+                        "id": 17,
+                        "device_id": 7,
+                        "rule_id": 2,
+                        "state": 2,
+                        "hostname": "fixture-node",
+                    }
+                ]
+            },
+        )
+
+    _mock_librenms(monkeypatch, handler)
+    await poll_alerts()
+    await asyncio.sleep(0)
+
+    assert new_alert_broadcasts == []
+    assert active_history_writes == []
+    assert (await redis_cache.get_json(CACHE_ALERTS))[0]["state"] == 2
 
 
 async def test_network_summary_counts_only_unacknowledged_alerts(wired_redis_cache, monkeypatch):

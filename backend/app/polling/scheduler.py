@@ -444,7 +444,11 @@ async def poll_alerts() -> None:
         current_ids = {a["id"] for a in current_alerts}
 
         # Detect new alerts
-        new_alert_ids = current_ids - previous_ids
+        new_alert_ids = {
+            alert["id"]
+            for alert in current_alerts
+            if alert["id"] not in previous_ids and alert["state"] != 2
+        }
         resolved_ids = previous_ids - current_ids
 
         # Cache alerts

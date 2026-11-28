@@ -169,7 +169,9 @@ async def _get_device_down_alerts() -> list[Alert]:
 
         for device_id, device in topology.devices.items():
             if device.status == DeviceStatus.DOWN:
-                alert_id = f"device-down-{device_id}"
+                if device.librenms_device_id is None:
+                    continue
+                alert_id = f"device-down-{device.librenms_device_id}"
                 alerts.append(Alert(
                     id=alert_id,
                     device_id=device_id,
@@ -253,6 +255,23 @@ async def _cache_librenms_acknowledgement(alert_id: str) -> None:
         await redis_cache.set(CACHE_ALERTS, cached_alerts)
 
 
+async def _clear_librenms_acknowledgement(alert_id: str) -> None:
+    """Clear local acknowledgement state after a successful LibreNMS unmute."""
+    await redis_cache.srem(CACHE_ALERT_ACK_OVERLAY, alert_id)
+    cached_alerts = await redis_cache.get_json(CACHE_ALERTS) or []
+    changed = False
+    for alert in cached_alerts:
+        if str(alert.get("id")) == alert_id and str(alert.get("state")) == "2":
+            alert["state"] = 1
+            changed = True
+    if changed:
+        await redis_cache.set(CACHE_ALERTS, cached_alerts)
+
+
+def _is_librenms_alert_not_found(exc: LibreNMSAPIError) -> bool:
+    return exc.status_code == 404 or "no alert by that id" in str(exc).casefold()
+
+
 @router.get("/alerts", response_model=list[AlertSummary])
 async def list_alerts(status: AlertStatus | None = None):
     """List all active alerts from device status and LibreNMS."""
@@ -306,7 +325,7 @@ async def acknowledge_alert(alert_id: str):
             async with LibreNMSClient() as client:
                 await client.acknowledge_alert(librenms_alert_id)
         except LibreNMSAPIError as exc:
-            if exc.status_code == 404 or "no alert by that id" in str(exc).casefold():
+            if _is_librenms_alert_not_found(exc):
                 raise HTTPException(
                     status_code=404,
                     detail="LibreNMS alert was not found",
@@ -337,11 +356,17 @@ async def resolve_alert(alert_id: str):
             async with LibreNMSClient() as client:
                 await client.unmute_alert(librenms_alert_id)
         except (httpx.HTTPError, LibreNMSAPIError) as exc:
+            if isinstance(exc, LibreNMSAPIError) and _is_librenms_alert_not_found(exc):
+                raise HTTPException(
+                    status_code=404,
+                    detail="LibreNMS alert was not found",
+                ) from exc
             logger.warning("LibreNMS unmute failed for %s: %s", alert_id, exc)
             raise HTTPException(
                 status_code=502,
                 detail="LibreNMS rejected the alert unmute request",
             ) from exc
+        await _clear_librenms_acknowledgement(librenms_alert_id)
     else:
         await redis_cache.srem(CACHE_ACKNOWLEDGED_ALERTS, alert_id)
     return {"status": "resolved", "alert_id": alert_id}
