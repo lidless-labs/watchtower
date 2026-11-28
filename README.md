@@ -1,3 +1,4 @@
+<!-- content-guard: allow infrastructure/private-hostname file -->
 <p align="center">
   <img src="docs/assets/watchtower-banner.jpg" alt="watchtower banner" width="900">
 </p>

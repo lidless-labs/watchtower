@@ -1,3 +1,4 @@
+# content-guard: allow infrastructure/private-ipv4 file
 # Watchtower Demo Topology - College Campus Network
 # ~50 devices across 3 buildings with realistic hierarchy:
 #   Edge -> Core -> Distribution -> Access

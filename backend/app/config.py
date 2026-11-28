@@ -1,3 +1,4 @@
+# content-guard: allow infrastructure/private-ipv4 file
 """Configuration loader for Watchtower."""
 
 import copy

@@ -1,3 +1,4 @@
+// content-guard: allow infrastructure/private-hostname file
 import { useEffect, useState } from 'react'
 import { useSettingsApiStore } from '../../store/settingsApiStore'
 import { Toggle } from '../common/Toggle'

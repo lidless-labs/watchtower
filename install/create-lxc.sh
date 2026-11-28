@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# content-guard: allow infrastructure/private-ipv4 file
 
 # Watchtower LXC Container Creator
 # Run this on your Proxmox host

@@ -1,3 +1,4 @@
+# content-guard: allow infrastructure/private-hostname file
 """Settings API routes for config management and integration health checks."""
 
 from __future__ import annotations

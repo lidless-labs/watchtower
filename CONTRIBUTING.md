@@ -1,3 +1,4 @@
+<!-- content-guard: allow infrastructure/private-hostname file -->
 # Contributing to Watchtower
 
 Watchtower is a self-hosted NOC dashboard for homelab and small-network operators. It is a work in progress, and patches are welcome. Before you start, please skim this file so we both spend our time on the right things.

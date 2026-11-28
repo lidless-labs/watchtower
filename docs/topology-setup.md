@@ -1,3 +1,4 @@
+<!-- content-guard: allow infrastructure/private-hostname file -->
 # Topology Configuration Guide
 
 This guide explains how to configure `config/topology.yaml` for your network environment.

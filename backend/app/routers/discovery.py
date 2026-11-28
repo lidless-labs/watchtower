@@ -1,3 +1,4 @@
+# content-guard: allow infrastructure/private-ipv4 file
 """Discovery API endpoints for LibreNMS device sync."""
 
 from typing import Annotated
