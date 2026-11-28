@@ -1,0 +1,5 @@
+{
+  "ports": [
+    {"port_id": 3, "device_id": 7, "ifName": "eth0", "ifAlias": "uplink", "ifDescr": "Ethernet 0", "ifSpeed": 1000000000, "ifOperStatus": "up", "ifAdminStatus": "up", "ifInOctets_rate": 125000, "ifOutOctets_rate": 250000}
+  ]
+}

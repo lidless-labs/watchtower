@@ -6,6 +6,7 @@
 # Test runner
 pytest>=7.0.0
 pytest-asyncio>=0.21.0
+pytest-cov>=4.1.0
 
 # Test Redis doubles
 fakeredis[lua]>=2.20.0  # [lua] extra is required: ratelimit.py uses EVAL scripts

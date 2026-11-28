@@ -1,0 +1,6 @@
+{
+  "devices": [
+    {"device_id": 7, "hostname": "switch-a.example.com", "sysName": "switch-a", "ip": "192.0.2.10", "status": 1, "os": "iosxe", "hardware": "Example Switch", "uptime": 12345},
+    {"device_id": 8, "hostname": "server-b.example.com", "ip": "192.0.2.11", "status": 0}
+  ]
+}
